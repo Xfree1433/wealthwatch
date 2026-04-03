@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Recurring{% endblock %}
+{% block page_title %}Recurring Bills{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="rec-stats"></div>
+<div class="action-bar">
+  <div class="card-title" style="margin:0">Subscriptions & Recurring Payments</div>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-secondary" onclick="autoPost()">Post Due Bills</button>
+    <button class="btn btn-primary" onclick="openRecModal()">+ Add Recurring</button>
+  </div>
+</div>
+<div class="card" style="margin-top:4px;margin-bottom:16px">
+  <div class="card-title">Bill Calendar — Next 30 Days</div>
+  <div id="bill-calendar"></div>
+</div>
+<div class="card">
+  <div id="rec-table"></div>
+</div>
+<div id="rec-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allRecurring = [];
+let recSortKey = 'next_date', recSortDir = 'asc';
+
+function setRecSort(key, dir) { recSortKey = key; recSortDir = dir; renderRecurring(); }
+
+function renderCalendar() {
+  const active = allRecurring.filter(i => i.active && i.next_date);
+  const today = new Date();
+  const days = [];
+  for (let d = 0; d < 30; d++) {
+    const dt = new Date(today);
+    dt.setDate(dt.getDate() + d);
+    const iso = dt.toISOString().slice(0, 10);
+    const bills = active.filter(b => b.next_date === iso);
+    days.push({ date: dt, iso, bills, isToday: d === 0 });
+  }
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  document.getElementById('bill-calendar').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+      ${dayNames.map(d => `<div style="text-align:center;font-size:10px;color:var(--muted);padding:4px">${d}</div>`).join('')}
+      ${'<div></div>'.repeat(days[0].date.getDay())}
+      ${days.map(d => {
+        const hasBills = d.bills.length > 0;
+        return `<div style="background:${d.isToday ? 'rgba(201,168,76,0.15)' : 'var(--surface2)'};border:1px solid ${hasBills ? 'var(--red)' : 'var(--border)'};border-radius:6px;padding:6px;min-height:48px;font-size:11px" title="${d.bills.map(b => b.name + ' ' + fmtCurrency(b.amount)).join(', ')}">
+          <div style="color:${d.isToday ? 'var(--accent)' : 'var(--muted)'};font-weight:${d.isToday ? '600' : '400'}">${d.date.getDate()}</div>
+          ${d.bills.map(b => `<div style="font-size:9px;color:var(--red);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(b.name)}</div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function renderRecurring() {
+  renderCalendar();
+  const items = sortBy(allRecurring, recSortKey, recSortDir);
+  const monthly = items.filter(i => i.active && i.frequency === 'monthly').reduce((s, i) => s + i.amount, 0);
+  const annual = items.filter(i => i.active && i.frequency === 'annual').reduce((s, i) => s + i.amount, 0);
+  const weekly = items.filter(i => i.active && i.frequency === 'weekly').reduce((s, i) => s + i.amount, 0);
+  const annualized = monthly * 12 + annual + weekly * 52;
+  document.getElementById('rec-stats').innerHTML = `
+    <div class="stat-card red"><div class="stat-label">Monthly Recurring</div><div class="stat-value">${fmtCurrency(monthly)}</div></div>
+    <div class="stat-card blue"><div class="stat-label">Annual Recurring</div><div class="stat-value">${fmtCurrency(annual)}</div></div>
+    <div class="stat-card gold"><div class="stat-label">Annualized Total</div><div class="stat-value">${fmtCurrency(annualized)}</div></div>
+  `;
+  document.getElementById('rec-table').innerHTML = items.length ? `
+    <table class="data-table">
+      <thead><tr>
+        ${sortHeader('Name','name',recSortKey,recSortDir,'setRecSort')}
+        ${sortHeader('Category','category',recSortKey,recSortDir,'setRecSort')}
+        ${sortHeader('Frequency','frequency',recSortKey,recSortDir,'setRecSort')}
+        ${sortHeader('Amount','amount',recSortKey,recSortDir,'setRecSort')}
+        ${sortHeader('Next Date','next_date',recSortKey,recSortDir,'setRecSort')}
+        <th>Status</th>
+        <th style="width:100px"></th>
+      </tr></thead>
+      <tbody>${items.map(i => {
+        const overdue = i.active && i.next_date && i.next_date <= todayISO();
+        return `<tr style="${!i.active ? 'opacity:0.5' : ''}">
+          <td><strong>${escHtml(i.name)}</strong>${overdue ? '<span style="color:var(--red);font-size:10px;margin-left:6px">OVERDUE</span>' : ''}</td>
+          <td><span style="font-size:12px;color:var(--muted)">${escHtml(i.category)}</span></td>
+          <td style="text-transform:capitalize">${i.frequency}</td>
+          <td style="text-align:right;font-weight:600;color:var(--red)">${fmtCurrency(i.amount)}</td>
+          <td style="color:var(--muted);font-size:12px">${fmtDate(i.next_date)}</td>
+          <td>
+            <button class="btn btn-sm ${i.active ? 'btn-secondary' : 'btn-danger'}" onclick="toggleRec(${i.id})" style="min-width:70px">
+              ${i.active ? 'Active' : 'Paused'}
+            </button>
+          </td>
+          <td>
+            <button class="btn-icon" onclick="openRecModal(${i.id})" title="Edit">&#9998;</button>
+            <button class="btn-icon" onclick="deleteRec(${i.id}, '${escAttr(i.name)}')" title="Delete" style="color:var(--red)">&#10005;</button>
+          </td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>` : '<div class="empty">No recurring bills. Add one to get started.</div>';
+}
+
+function openRecModal(editId) {
+  const r = editId ? allRecurring.find(x => x.id === editId) : null;
+  const title = r ? 'Edit Recurring Bill' : 'Add Recurring Bill';
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="rec-name" value="${r ? escAttr(r.name) : ''}" placeholder="e.g. Netflix">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Amount</label>
+        <input class="form-input" id="rec-amount" type="number" step="0.01" value="${r ? r.amount : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Frequency</label>
+        <select class="form-select" id="rec-freq">
+          ${['monthly','weekly','annual'].map(f => `<option value="${f}" ${r && r.frequency === f ? 'selected' : ''}>${f.charAt(0).toUpperCase()+f.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <input class="form-input" id="rec-cat" value="${r ? escAttr(r.category) : ''}" placeholder="e.g. Subscriptions">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Next Date</label>
+        <input class="form-input" id="rec-next" type="date" value="${r ? (r.next_date || '') : todayISO()}">
+      </div>
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('rec-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveRec(${editId || 'null'})">${r ? 'Save Changes' : 'Add Recurring'}</button>`;
+  document.getElementById('rec-modal-root').innerHTML = modalShell('rec-modal', title, body, footer);
+  openModal('rec-modal');
+}
+
+async function saveRec(editId) {
+  const existing = editId ? allRecurring.find(x => x.id === editId) : null;
+  const data = {
+    name: document.getElementById('rec-name').value.trim(),
+    amount: parseFloat(document.getElementById('rec-amount').value) || 0,
+    frequency: document.getElementById('rec-freq').value,
+    category: document.getElementById('rec-cat').value.trim(),
+    next_date: document.getElementById('rec-next').value,
+    active: existing ? existing.active : 1
+  };
+  if (!data.name || !data.amount) return toast('Name and amount are required.', 'error');
+  try {
+    if (editId) await apiPut('/api/recurring/' + editId, data);
+    else await apiPost('/api/recurring', data);
+    closeModal('rec-modal');
+    toast(editId ? 'Recurring updated' : 'Recurring added');
+    await loadRecurring();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function toggleRec(id) {
+  await apiPost('/api/recurring/' + id + '/toggle', {});
+  toast('Status toggled');
+  await loadRecurring();
+}
+
+async function deleteRec(id, name) {
+  confirmDelete(name, async () => {
+    await apiDelete('/api/recurring/' + id);
+    toast('Recurring deleted');
+    await loadRecurring();
+  });
+}
+
+async function autoPost() {
+  try {
+    const r = await apiPost('/api/recurring/autopost', {});
+    if (r.posted > 0) toast(`Auto-posted ${r.posted} recurring bill${r.posted > 1 ? 's' : ''}`);
+    else toast('No bills due today', 'info');
+    await loadRecurring();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function loadRecurring() {
+  allRecurring = await apiFetch('/api/recurring');
+  renderRecurring();
+}
+
+loadRecurring();
+</script>
+{% endblock %}

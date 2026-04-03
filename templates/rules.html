@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Transaction Rules{% endblock %}
+{% block page_title %}Transaction Rules{% endblock %}
+
+{% block content %}
+<div class="action-bar">
+  <div style="font-size:12px;color:var(--muted)">Rules auto-assign categories when adding transactions. Higher priority rules are checked first.</div>
+  <button class="btn btn-primary" onclick="openRuleModal()">+ Add Rule</button>
+</div>
+<div class="card">
+  <div id="rules-table"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+
+<div class="card" style="margin-top:24px">
+  <div class="card-title">License</div>
+  <div id="license-section"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-title">Data Management</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+    <a href="/api/backup" class="btn btn-secondary" style="text-decoration:none">Download Backup</a>
+    <div>
+      <input type="file" id="restore-file" accept=".json" title="Select backup JSON file" class="form-input" style="width:auto;padding:7px 12px;display:inline-block">
+      <button class="btn btn-secondary" onclick="doRestore()">Restore from Backup</button>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin-top:10px">
+    Backup exports all accounts, transactions, budgets, goals, holdings, and rules as JSON.
+    Restore merges data without overwriting existing records.
+  </div>
+</div>
+<div id="rule-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allRules = [];
+let ruleSortKey = 'priority', ruleSortDir = 'desc';
+
+function setRuleSort(key, dir) { ruleSortKey = key; ruleSortDir = dir; renderRules(); }
+
+function renderRules() {
+  const rules = sortBy(allRules, ruleSortKey, ruleSortDir);
+  document.getElementById('rules-table').innerHTML = rules.length ? `
+    <table class="data-table">
+      <thead><tr>
+        ${sortHeader('Pattern','pattern',ruleSortKey,ruleSortDir,'setRuleSort')}
+        ${sortHeader('Category','category',ruleSortKey,ruleSortDir,'setRuleSort')}
+        <th>Tags</th>
+        ${sortHeader('Priority','priority',ruleSortKey,ruleSortDir,'setRuleSort')}
+        <th style="width:80px"></th>
+      </tr></thead>
+      <tbody>${rules.map(r => `
+        <tr>
+          <td><strong>${escHtml(r.pattern)}</strong></td>
+          <td>${escHtml(r.category)}</td>
+          <td>${(r.tags || '').split(',').filter(Boolean).map(t => '<span class="tag">'+escHtml(t)+'</span>').join('')}</td>
+          <td style="color:var(--muted)">${r.priority}</td>
+          <td>
+            <button class="btn-icon" onclick="openRuleModal(${r.id})" title="Edit">&#9998;</button>
+            <button class="btn-icon" onclick="deleteRule(${r.id}, '${escAttr(r.pattern)}')" title="Delete" style="color:var(--red)">&#10005;</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : '<div class="empty">No rules. Add one to enable auto-categorization.</div>';
+}
+
+function openRuleModal(editId) {
+  const r = editId ? allRules.find(x => x.id === editId) : null;
+  const title = r ? 'Edit Rule' : 'Add Rule';
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Pattern (matches description)</label>
+      <input class="form-input" id="rule-pattern" value="${r ? escAttr(r.pattern) : ''}" placeholder="e.g. Starbucks">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <input class="form-input" id="rule-category" value="${r ? escAttr(r.category) : ''}" placeholder="e.g. Dining Out">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Priority (higher = first)</label>
+        <input class="form-input" id="rule-priority" type="number" value="${r ? r.priority : '5'}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Auto-tags (comma-separated, optional)</label>
+      <input class="form-input" id="rule-tags" value="${r ? escAttr(r.tags || '') : ''}" placeholder="e.g. business, tax-deductible">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('rule-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveRule(${editId || 'null'})">${r ? 'Save Changes' : 'Add Rule'}</button>`;
+  document.getElementById('rule-modal-root').innerHTML = modalShell('rule-modal', title, body, footer);
+  openModal('rule-modal');
+}
+
+async function saveRule(editId) {
+  const data = {
+    pattern: document.getElementById('rule-pattern').value.trim(),
+    category: document.getElementById('rule-category').value.trim(),
+    priority: parseInt(document.getElementById('rule-priority').value) || 0,
+    tags: document.getElementById('rule-tags').value.trim()
+  };
+  if (!data.pattern || !data.category) return toast('Pattern and category are required.', 'error');
+  try {
+    if (editId) await apiPut('/api/rules/' + editId, data);
+    else await apiPost('/api/rules', data);
+    closeModal('rule-modal');
+    toast(editId ? 'Rule updated' : 'Rule added');
+    await loadRules();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteRule(id, name) {
+  confirmDelete(name, async () => {
+    await apiDelete('/api/rules/' + id);
+    toast('Rule deleted');
+    await loadRules();
+  });
+}
+
+async function doRestore() {
+  const f = document.getElementById('restore-file');
+  if (!f.files.length) return toast('Select a backup file.', 'error');
+  const form = new FormData();
+  form.append('file', f.files[0]);
+  try {
+    const res = await fetch('/api/restore', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Restore failed');
+    const counts = Object.entries(data.restored || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
+    toast('Restored: ' + (counts || 'no new data'));
+    await loadRules();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function loadLicense() {
+  const lic = await apiFetch('/api/license');
+  const el = document.getElementById('license-section');
+  if (lic.licensed) {
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:20px;color:var(--green)">&#10003;</span>
+        <div>
+          <div style="font-weight:600;color:var(--green)">Licensed</div>
+          <div style="font-size:12px;color:var(--muted)">Key: ${escHtml(lic.key)}</div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="deactivateLicense()">Deactivate License</button>`;
+  } else {
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:20px;color:${lic.expired ? 'var(--red)' : 'var(--accent)'}">
+          ${lic.expired ? '&#10007;' : '&#9201;'}
+        </span>
+        <div>
+          <div style="font-weight:600;color:${lic.expired ? 'var(--red)' : 'var(--accent)'}">
+            ${lic.expired ? 'Trial Expired' : 'Demo Mode'}
+          </div>
+          <div style="font-size:12px;color:var(--muted)">
+            ${lic.expired ? 'Enter a license key to continue using WealthWatch.' : lic.days_remaining + ' days remaining in trial'}
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;padding:10px;background:var(--surface2);border-radius:8px">
+        Demo limits: ${lic.limits.max_accounts} accounts, ${lic.limits.max_transactions} transactions, ${lic.limits.max_holdings} holdings.
+        Import/export and backup disabled.
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-input" id="license-key" placeholder="XXXX-XXXX-XXXX-XXXX" style="width:240px;text-transform:uppercase;letter-spacing:2px;font-size:14px">
+        <button class="btn btn-primary" onclick="activateLicense()">Activate</button>
+      </div>`;
+  }
+}
+
+async function activateLicense() {
+  const key = document.getElementById('license-key').value.trim();
+  if (!key) return toast('Enter a license key.', 'error');
+  try {
+    await apiPost('/api/license/activate', { key });
+    toast('License activated!');
+    await loadLicense();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deactivateLicense() {
+  confirmDelete('your license', async () => {
+    await apiPost('/api/license/deactivate', {});
+    toast('License deactivated');
+    await loadLicense();
+  });
+}
+
+async function loadRules() {
+  allRules = await apiFetch('/api/rules');
+  renderRules();
+}
+
+loadLicense();
+loadRules();
+</script>
+{% endblock %}

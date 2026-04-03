@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+{% block title %}Transactions{% endblock %}
+{% block page_title %}Transactions{% endblock %}
+
+{% block content %}
+<div class="action-bar">
+  <div class="card" style="flex:1;padding:12px 16px;margin-right:12px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <input id="search-input" type="text" placeholder="Search transactions..."
+        class="form-input" style="flex:1;min-width:160px;margin:0">
+      <select id="cat-filter" class="form-select" style="width:auto;min-width:140px">
+        <option value="">All Categories</option>
+      </select>
+      <select id="type-filter" class="form-select" style="width:auto;min-width:140px">
+        <option value="">Income &amp; Expenses</option>
+        <option value="income">Income only</option>
+        <option value="expense">Expenses only</option>
+      </select>
+      <div style="display:flex;gap:6px;align-items:center">
+        <label style="font-size:11px;color:var(--muted);white-space:nowrap">FROM</label>
+        <input id="date-from" type="date" class="form-input" style="width:auto;margin:0;padding:7px 10px">
+        <label style="font-size:11px;color:var(--muted);white-space:nowrap">TO</label>
+        <input id="date-to" type="date" class="form-input" style="width:auto;margin:0;padding:7px 10px">
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <button class="btn btn-primary" onclick="openTxnModal()">+ Add Transaction</button>
+    <button class="btn btn-secondary btn-sm" onclick="openTransferModal()">Transfer</button>
+    <div style="display:flex;gap:6px">
+      <a href="/api/export/transactions" class="btn btn-secondary btn-sm" style="text-decoration:none">Export CSV</a>
+      <button class="btn btn-secondary btn-sm" onclick="openImportModal()">Import CSV</button>
+    </div>
+  </div>
+</div>
+<!-- Bulk action bar -->
+<div id="bulk-bar" style="display:none;margin-bottom:12px">
+  <div class="card" style="padding:10px 16px;display:flex;align-items:center;gap:12px;background:rgba(201,168,76,0.08);border-color:var(--accent)">
+    <span id="bulk-count" style="font-size:13px;font-weight:600;color:var(--accent2)">0 selected</span>
+    <button class="btn btn-sm btn-secondary" onclick="bulkCategorize()">Set Category</button>
+    <button class="btn btn-sm btn-secondary" onclick="bulkTag()">Add Tag</button>
+    <button class="btn btn-sm btn-danger" onclick="bulkDelete()">Delete Selected</button>
+    <button class="btn-icon" onclick="clearSelection()" title="Clear" style="margin-left:auto;font-size:16px">&times;</button>
+  </div>
+</div>
+<div class="card">
+  <div id="txn-table"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+<div id="txn-modal-root"></div>
+<div id="import-modal-root"></div>
+<div id="transfer-modal-root"></div>
+<div id="split-modal-root"></div>
+<div id="bulk-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allTxns = [], txnAccounts = [];
+let txnPage = 1, txnPerPage = 50;
+let txnSortKey = 'date', txnSortDir = 'desc';
+let selectedIds = new Set();
+
+function setTxnSort(key, dir) { txnSortKey = key; txnSortDir = dir; txnPage = 1; renderTable(); }
+function setTxnPage(p) { txnPage = p; renderTable(); }
+
+function toggleSelect(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+  updateBulkBar();
+  const cb = document.getElementById('cb-'+id);
+  if (cb) cb.checked = selectedIds.has(id);
+}
+function toggleAll(checked) {
+  const visible = getFiltered().map(t => t.id);
+  visible.forEach(id => { if (checked) selectedIds.add(id); else selectedIds.delete(id); });
+  updateBulkBar();
+  renderTable();
+}
+function clearSelection() { selectedIds.clear(); updateBulkBar(); renderTable(); }
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  bar.style.display = selectedIds.size > 0 ? 'block' : 'none';
+  document.getElementById('bulk-count').textContent = selectedIds.size + ' selected';
+}
+
+function getFiltered() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const cat = document.getElementById('cat-filter').value;
+  const type = document.getElementById('type-filter').value;
+  return allTxns.filter(t => {
+    if (t.is_split && t.split_parent_id) return false;
+    if (search && !t.description.toLowerCase().includes(search) && !t.category.toLowerCase().includes(search)
+        && !(t.tags || '').toLowerCase().includes(search)) return false;
+    if (cat && t.category !== cat) return false;
+    if (type === 'income' && t.amount < 0) return false;
+    if (type === 'expense' && t.amount >= 0) return false;
+    return true;
+  });
+}
+
+function renderTable() {
+  let filtered = sortBy(getFiltered(), txnSortKey, txnSortDir);
+  const p = paginate(filtered, txnPage, txnPerPage);
+  if (!filtered.length) {
+    document.getElementById('txn-table').innerHTML = '<div class="empty">No transactions match your filters.</div>';
+    return;
+  }
+  const allChecked = p.data.every(t => selectedIds.has(t.id));
+  document.getElementById('txn-table').innerHTML = `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${filtered.length} transaction${filtered.length !== 1 ? 's' : ''}</div>
+    <table class="data-table">
+      <thead><tr>
+        <th style="width:30px"><input type="checkbox" ${allChecked && p.data.length ? 'checked' : ''} onchange="toggleAll(this.checked)"></th>
+        ${sortHeader('Date','date',txnSortKey,txnSortDir,'setTxnSort')}
+        ${sortHeader('Description','description',txnSortKey,txnSortDir,'setTxnSort')}
+        ${sortHeader('Category','category',txnSortKey,txnSortDir,'setTxnSort')}
+        <th>Account</th>
+        <th>Tags</th>
+        ${sortHeader('Amount','amount',txnSortKey,txnSortDir,'setTxnSort')}
+        <th style="width:100px"></th>
+      </tr></thead>
+      <tbody>${p.data.map(t => {
+        const tags = (t.tags || '').split(',').filter(Boolean);
+        const isTransfer = t.category === 'Transfer';
+        const sel = selectedIds.has(t.id);
+        return `<tr style="${sel ? 'background:rgba(201,168,76,0.06)' : ''}">
+          <td><input type="checkbox" id="cb-${t.id}" ${sel ? 'checked' : ''} onchange="toggleSelect(${t.id})"></td>
+          <td style="color:var(--muted)">${fmtShortDate(t.date)}</td>
+          <td><strong>${escHtml(t.description)}</strong>${t.notes ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+escHtml(t.notes)+'</div>' : ''}${t.is_split ? '<span class="badge badge-transfer" style="margin-left:6px;font-size:9px">SPLIT</span>' : ''}</td>
+          <td><span class="badge ${isTransfer ? 'badge-transfer' : ''}" style="font-size:11px">${escHtml(t.category)}</span></td>
+          <td style="color:var(--muted);font-size:12px">${escHtml(t.account_name || '—')}</td>
+          <td>${tags.map(tg => '<span class="tag">'+escHtml(tg)+'</span>').join('')}</td>
+          <td style="text-align:right;font-weight:600" class="${t.amount >= 0 ? 'pos' : 'neg'}">${t.amount >= 0 ? '+' : ''}${fmtCurrency(t.amount)}</td>
+          <td>
+            <button class="btn-icon" onclick="openTxnModal(${t.id})" title="Edit">&#9998;</button>
+            ${!isTransfer && !t.is_split ? `<button class="btn-icon" onclick="openSplitModal(${t.id})" title="Split" style="font-size:12px">&#8967;</button>` : ''}
+            <button class="btn-icon" onclick="deleteTxn(${t.id}, '${escAttr(t.description)}')" title="Delete" style="color:var(--red)">&#10005;</button>
+          </td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>
+    ${paginationHtml(p, 'setTxnPage')}`;
+}
+
+function openTxnModal(editId) {
+  const txn = editId ? allTxns.find(t => t.id === editId) : null;
+  const title = txn ? 'Edit Transaction' : 'Add Transaction';
+  const cats = [...new Set(allTxns.map(t => t.category))].sort();
+  const body = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input class="form-input" id="txn-date" type="date" value="${txn ? txn.date : todayISO()}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Account</label>
+        <select class="form-select" id="txn-account">
+          ${txnAccounts.map(a => `<option value="${a.id}" ${txn && txn.account_id === a.id ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input class="form-input" id="txn-desc" value="${txn ? escAttr(txn.description) : ''}" placeholder="e.g. HEB Grocery" onblur="autoFillCategory()">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Category <span id="auto-cat-hint" style="font-size:10px;color:var(--green)"></span></label>
+        <input class="form-input" id="txn-cat" list="txn-cat-list" value="${txn ? escAttr(txn.category) : ''}" placeholder="e.g. Groceries">
+        <datalist id="txn-cat-list">${cats.map(c => `<option value="${escAttr(c)}">`).join('')}</datalist>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount (negative = expense)</label>
+        <input class="form-input" id="txn-amount" type="number" step="0.01" value="${txn ? txn.amount : ''}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tags (comma-separated)</label>
+      <input class="form-input" id="txn-tags" value="${txn ? escAttr(txn.tags || '') : ''}" placeholder="e.g. tax-deductible, business">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes (optional)</label>
+      <input class="form-input" id="txn-notes" value="${txn ? escAttr(txn.notes || '') : ''}" placeholder="Optional notes">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('txn-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveTxn(${editId || 'null'})">${txn ? 'Save Changes' : 'Add Transaction'}</button>`;
+  document.getElementById('txn-modal-root').innerHTML = modalShell('txn-modal', title, body, footer);
+  openModal('txn-modal');
+}
+
+async function autoFillCategory() {
+  const desc = document.getElementById('txn-desc').value.trim();
+  const catField = document.getElementById('txn-cat');
+  const tagField = document.getElementById('txn-tags');
+  const hint = document.getElementById('auto-cat-hint');
+  if (!desc || catField.value) return;
+  try {
+    const r = await apiPost('/api/autocategorize', { description: desc });
+    if (r.category) {
+      catField.value = r.category;
+      if (r.tags && !tagField.value) tagField.value = r.tags;
+      hint.textContent = '(auto-matched)';
+      setTimeout(() => hint.textContent = '', 3000);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function saveTxn(editId) {
+  const data = {
+    date: document.getElementById('txn-date').value,
+    account_id: parseInt(document.getElementById('txn-account').value),
+    description: document.getElementById('txn-desc').value.trim(),
+    category: document.getElementById('txn-cat').value.trim(),
+    amount: parseFloat(document.getElementById('txn-amount').value) || 0,
+    tags: document.getElementById('txn-tags').value.trim(),
+    notes: document.getElementById('txn-notes').value.trim()
+  };
+  if (!data.description || !data.category) return toast('Description and category are required.', 'error');
+  try {
+    if (editId) await apiPut('/api/transactions/' + editId, data);
+    else await apiPost('/api/transactions', data);
+    closeModal('txn-modal');
+    toast(editId ? 'Transaction updated' : 'Transaction added');
+    await loadTxns();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteTxn(id, name) {
+  confirmDelete(name, async () => {
+    await apiDelete('/api/transactions/' + id);
+    toast('Transaction deleted');
+    await loadTxns();
+  });
+}
+
+// ── Bulk operations ──────────────────────────────────────────────────────
+async function bulkDelete() {
+  if (!selectedIds.size) return;
+  confirmDelete(selectedIds.size + ' transaction(s)', async () => {
+    await apiPost('/api/transactions/bulk', { ids: [...selectedIds], action: 'delete' });
+    toast(selectedIds.size + ' transactions deleted');
+    selectedIds.clear(); updateBulkBar();
+    await loadTxns();
+  });
+}
+
+function bulkCategorize() {
+  const cats = [...new Set(allTxns.map(t => t.category))].sort();
+  const body = `<div class="form-group">
+    <label class="form-label">New Category for ${selectedIds.size} transactions</label>
+    <input class="form-input" id="bulk-cat" list="bulk-cat-list" placeholder="e.g. Groceries">
+    <datalist id="bulk-cat-list">${cats.map(c => `<option value="${escAttr(c)}">`).join('')}</datalist>
+  </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('bulk-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="doBulkCat()">Apply</button>`;
+  document.getElementById('bulk-modal-root').innerHTML = modalShell('bulk-modal', 'Bulk Categorize', body, footer);
+  openModal('bulk-modal');
+}
+
+async function doBulkCat() {
+  const cat = document.getElementById('bulk-cat').value.trim();
+  if (!cat) return toast('Enter a category.', 'error');
+  await apiPost('/api/transactions/bulk', { ids: [...selectedIds], action: 'categorize', category: cat });
+  closeModal('bulk-modal');
+  toast(selectedIds.size + ' transactions categorized');
+  selectedIds.clear(); updateBulkBar();
+  await loadTxns();
+}
+
+function bulkTag() {
+  const body = `<div class="form-group">
+    <label class="form-label">Tag to add to ${selectedIds.size} transactions</label>
+    <input class="form-input" id="bulk-tag" placeholder="e.g. tax-deductible">
+  </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('bulk-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="doBulkTag()">Apply</button>`;
+  document.getElementById('bulk-modal-root').innerHTML = modalShell('bulk-modal', 'Bulk Tag', body, footer);
+  openModal('bulk-modal');
+}
+
+async function doBulkTag() {
+  const tag = document.getElementById('bulk-tag').value.trim();
+  if (!tag) return toast('Enter a tag.', 'error');
+  await apiPost('/api/transactions/bulk', { ids: [...selectedIds], action: 'tag', tag });
+  closeModal('bulk-modal');
+  toast(selectedIds.size + ' transactions tagged');
+  selectedIds.clear(); updateBulkBar();
+  await loadTxns();
+}
+
+// ── Transfer, Split, Import (unchanged) ──────────────────────────────────
+function openTransferModal() {
+  const body = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">From Account</label>
+        <select class="form-select" id="xfer-from">
+          ${txnAccounts.map(a => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">To Account</label>
+        <select class="form-select" id="xfer-to">
+          ${txnAccounts.map(a => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Amount</label>
+        <input class="form-input" id="xfer-amount" type="number" step="0.01" placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input class="form-input" id="xfer-date" type="date" value="${todayISO()}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description (optional)</label>
+      <input class="form-input" id="xfer-desc" placeholder="Transfer" value="Transfer">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('xfer-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="doTransfer()">Transfer</button>`;
+  document.getElementById('transfer-modal-root').innerHTML = modalShell('xfer-modal', 'Transfer Between Accounts', body, footer);
+  openModal('xfer-modal');
+}
+async function doTransfer() {
+  const data = {
+    from_account_id: parseInt(document.getElementById('xfer-from').value),
+    to_account_id: parseInt(document.getElementById('xfer-to').value),
+    amount: parseFloat(document.getElementById('xfer-amount').value) || 0,
+    date: document.getElementById('xfer-date').value,
+    description: document.getElementById('xfer-desc').value.trim()
+  };
+  if (data.from_account_id === data.to_account_id) return toast('Select different accounts.', 'error');
+  if (data.amount <= 0) return toast('Enter a positive amount.', 'error');
+  try {
+    await apiPost('/api/transfers', data);
+    closeModal('xfer-modal');
+    toast('Transfer completed');
+    await loadTxns();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function openSplitModal(tid) {
+  const txn = allTxns.find(t => t.id === tid);
+  if (!txn) return;
+  const body = `
+    <div style="margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted)">
+      Splitting: <strong style="color:var(--text)">${escHtml(txn.description)}</strong> — ${fmtCurrency(txn.amount)}<br>
+      Split amounts must equal the original total.
+    </div>
+    <div id="split-rows">
+      <div class="split-row form-row" style="margin-bottom:8px">
+        <div class="form-group" style="margin-bottom:0"><input class="form-input" placeholder="Category" value="${escAttr(txn.category)}"></div>
+        <div class="form-group" style="margin-bottom:0"><input class="form-input" type="number" step="0.01" placeholder="Amount" value="${txn.amount < 0 ? Math.round(txn.amount/2*100)/100 : ''}"></div>
+      </div>
+      <div class="split-row form-row" style="margin-bottom:8px">
+        <div class="form-group" style="margin-bottom:0"><input class="form-input" placeholder="Category" value=""></div>
+        <div class="form-group" style="margin-bottom:0"><input class="form-input" type="number" step="0.01" placeholder="Amount" value="${txn.amount < 0 ? Math.round((txn.amount - Math.round(txn.amount/2*100)/100)*100)/100 : ''}"></div>
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="addSplitRow()">+ Add Row</button>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('split-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="doSplit(${tid})">Split Transaction</button>`;
+  document.getElementById('split-modal-root').innerHTML = modalShell('split-modal', 'Split Transaction', body, footer);
+  openModal('split-modal');
+}
+function addSplitRow() {
+  const row = document.createElement('div');
+  row.className = 'split-row form-row'; row.style.marginBottom = '8px';
+  row.innerHTML = '<div class="form-group" style="margin-bottom:0"><input class="form-input" placeholder="Category"></div><div class="form-group" style="margin-bottom:0"><input class="form-input" type="number" step="0.01" placeholder="Amount"></div>';
+  document.getElementById('split-rows').appendChild(row);
+}
+async function doSplit(tid) {
+  const rows = document.querySelectorAll('#split-rows .split-row');
+  const splits = [];
+  rows.forEach(r => { const i = r.querySelectorAll('input'); const cat = i[0].value.trim(); const amt = parseFloat(i[1].value); if (cat && !isNaN(amt)) splits.push({category:cat,amount:amt}); });
+  if (splits.length < 2) return toast('Need at least 2 split items.', 'error');
+  try { await apiPost('/api/transactions/'+tid+'/split',{splits}); closeModal('split-modal'); toast('Transaction split'); await loadTxns(); }
+  catch (e) { toast('Error: '+e.message, 'error'); }
+}
+
+function openImportModal() {
+  const body = `
+    <div class="form-group"><label class="form-label">Target Account</label><select class="form-select" id="import-account">${txnAccounts.map(a => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">CSV File</label><input type="file" id="import-file" accept=".csv" class="form-input" style="padding:8px"></div>
+    <div style="font-size:11px;color:var(--muted);background:var(--surface2);padding:10px;border-radius:8px;line-height:1.5">CSV must include: <strong>Date</strong>, <strong>Description</strong>, <strong>Amount</strong>. Optional: <strong>Category</strong>, <strong>Notes</strong>.</div>`;
+  const footer = `<button class="btn btn-secondary" onclick="closeModal('import-modal')">Cancel</button><button class="btn btn-primary" onclick="doImport()">Import</button>`;
+  document.getElementById('import-modal-root').innerHTML = modalShell('import-modal', 'Import Transactions', body, footer);
+  openModal('import-modal');
+}
+async function doImport() {
+  const f = document.getElementById('import-file'); const aid = document.getElementById('import-account').value;
+  if (!f.files.length) return toast('Select a CSV file.', 'error');
+  const form = new FormData(); form.append('file', f.files[0]); form.append('account_id', aid);
+  try { const r = await fetch('/api/import/transactions',{method:'POST',body:form}); const d = await r.json(); if (!r.ok) throw new Error(d.error); closeModal('import-modal'); toast(`Imported ${d.imported} transactions`); await loadTxns(); }
+  catch (e) { toast('Error: '+e.message, 'error'); }
+}
+
+async function loadTxns() {
+  let url = '/api/transactions?limit=2000';
+  const df = document.getElementById('date-from').value;
+  const dt = document.getElementById('date-to').value;
+  if (df) url += '&from=' + df;
+  if (dt) url += '&to=' + dt;
+  allTxns = await apiFetch(url);
+  const cats = [...new Set(allTxns.map(t => t.category))].sort();
+  const catSel = document.getElementById('cat-filter');
+  const current = catSel.value;
+  catSel.innerHTML = '<option value="">All Categories</option>' + cats.map(c => `<option value="${escAttr(c)}">${escHtml(c)}</option>`).join('');
+  catSel.value = current;
+  renderTable();
+}
+
+(async () => {
+  txnAccounts = await apiFetch('/api/accounts');
+  await loadTxns();
+  document.getElementById('search-input').addEventListener('input', () => { txnPage = 1; renderTable(); });
+  document.getElementById('cat-filter').addEventListener('change', () => { txnPage = 1; renderTable(); });
+  document.getElementById('type-filter').addEventListener('change', () => { txnPage = 1; renderTable(); });
+  document.getElementById('date-from').addEventListener('change', loadTxns);
+  document.getElementById('date-to').addEventListener('change', loadTxns);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block page_title %}Reports{% endblock %}
+
+{% block content %}
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">Spending by Category</div>
+    <div id="spend-pie"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Spending by Category — Bar</div>
+    <div id="spend-by-cat"></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-title">Spending Trends by Category — Month over Month</div>
+  <div id="spending-trends"></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-title">Income vs Expenses — 12 Month Trend</div>
+  <div id="trend-chart"></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-title">12-Month Cash Flow Summary</div>
+  <div id="cf-summary"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PIE_COLORS = ['#c9a84c','#4caf82','#5c9be0','#e05c5c','#9b74d4','#e08a5c','#e8c97a','#6fdaa8','#8ab8ed','#e88a8a','#b89de0','#607d8b'];
+
+(async () => {
+  const [cats, cf, trends] = await Promise.all([apiFetch('/api/budget'), apiFetch('/api/cashflow'), apiFetch('/api/spending-trends?months=6').catch(() => null)]);
+
+  // ── Pie chart ──────────────────────────────────────────────────────────
+  const spentCats = cats.filter(c => c.spent > 0).sort((a, b) => b.spent - a.spent);
+  const totalSpent = spentCats.reduce((s, c) => s + c.spent, 0);
+  if (spentCats.length && totalSpent > 0) {
+    let cumulativePct = 0;
+    const slices = spentCats.map((c, i) => {
+      const pct = (c.spent / totalSpent) * 100;
+      const start = cumulativePct;
+      cumulativePct += pct;
+      return { ...c, pct, start, color: PIE_COLORS[i % PIE_COLORS.length] };
+    });
+    // Build conic-gradient
+    const gradientStops = slices.map(s => `${s.color} ${s.start}% ${s.start + s.pct}%`).join(', ');
+    document.getElementById('spend-pie').innerHTML = `
+      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div style="width:160px;height:160px;border-radius:50%;background:conic-gradient(${gradientStops});flex-shrink:0"></div>
+        <div class="pie-legend">
+          ${slices.map(s => `<div class="pie-legend-item">
+            <div class="pie-swatch" style="background:${s.color}"></div>
+            <span style="flex:1">${s.icon} ${escHtml(s.category)}</span>
+            <span style="color:var(--muted)">${fmtCurrency(s.spent)} (${s.pct.toFixed(1)}%)</span>
+          </div>`).join('')}
+        </div>
+      </div>`;
+  } else {
+    document.getElementById('spend-pie').innerHTML = '<div class="empty">No spending data</div>';
+  }
+
+  // ── Bar chart ──────────────────────────────────────────────────────────
+  const maxSpent = Math.max(...cats.map(c => c.spent), 1);
+  document.getElementById('spend-by-cat').innerHTML = cats.filter(c => c.spent > 0).sort((a,b) => b.spent - a.spent).map((c, i) => {
+    const w = Math.round((c.spent / maxSpent) * 100);
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+        <span style="font-size:12.5px">${c.icon} ${escHtml(c.category)}</span>
+        <span style="font-size:12px;font-weight:600">${fmtCurrency(c.spent)}</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${w}%;background:${PIE_COLORS[i % PIE_COLORS.length]}"></div></div>
+    </div>`;
+  }).join('') || '<div class="empty">No spending data</div>';
+
+  // ── Spending Trends (month-over-month comparison table) ─────────────────
+  if (trends && trends.months.length >= 2) {
+    const topCats = trends.categories
+      .map(cat => ({ cat, total: trends.months.reduce((s, m) => s + (trends.data[m][cat] || 0), 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10)
+      .map(x => x.cat);
+
+    let html = `<div style="overflow-x:auto"><table class="data-table">
+      <thead><tr><th>Category</th>${trends.months.map(m => `<th style="text-align:right">${m}</th>`).join('')}<th style="text-align:right">Trend</th></tr></thead>
+      <tbody>`;
+    topCats.forEach((cat, ci) => {
+      const vals = trends.months.map(m => trends.data[m][cat] || 0);
+      const first = vals[0] || 1;
+      const last = vals[vals.length - 1];
+      const change = last - first;
+      const changePct = first > 0 ? Math.round((change / first) * 100) : 0;
+      // Mini sparkline
+      const maxV = Math.max(...vals, 1);
+      const sparkPts = vals.map((v, i) => `${i / (vals.length - 1) * 40},${20 - (v / maxV) * 18}`).join(' ');
+      html += `<tr>
+        <td style="font-weight:500">${escHtml(cat)}</td>
+        ${vals.map(v => `<td style="text-align:right;color:var(--muted)">${v > 0 ? fmtCurrency(v) : '—'}</td>`).join('')}
+        <td style="text-align:right">
+          <svg width="44" height="22" viewBox="0 0 40 20"><polyline points="${sparkPts}" fill="none" stroke="${PIE_COLORS[ci % PIE_COLORS.length]}" stroke-width="1.5" /></svg>
+          <div style="font-size:10px;color:${change > 0 ? 'var(--red)' : 'var(--green)'}">${change > 0 ? '+' : ''}${changePct}%</div>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('spending-trends').innerHTML = html;
+  } else {
+    document.getElementById('spending-trends').innerHTML = '<div class="empty">Not enough data for trends</div>';
+  }
+
+  // ── Trend chart (SVG line chart) ───────────────────────────────────────
+  if (cf.length >= 2) {
+    const months = cf.slice().reverse(); // chronological order
+    const maxVal = Math.max(...months.flatMap(m => [m.income, m.expenses]), 1);
+    const chartW = 100, chartH = 150, pad = 10;
+    const usableW = chartW - pad * 2, usableH = chartH - pad * 2;
+    const incPts = months.map((m, i) => {
+      const x = pad + (i / (months.length - 1)) * usableW;
+      const y = pad + (1 - m.income / maxVal) * usableH;
+      return `${x},${y}`;
+    });
+    const expPts = months.map((m, i) => {
+      const x = pad + (i / (months.length - 1)) * usableW;
+      const y = pad + (1 - m.expenses / maxVal) * usableH;
+      return `${x},${y}`;
+    });
+    const incFill = `${pad},${chartH - pad} ${incPts.join(' ')} ${chartW - pad},${chartH - pad}`;
+    const expFill = `${pad},${chartH - pad} ${expPts.join(' ')} ${chartW - pad},${chartH - pad}`;
+
+    document.getElementById('trend-chart').innerHTML = `
+      <div style="display:flex;gap:16px;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--green)">&#9632; Income</span>
+        <span style="font-size:11px;color:var(--red)">&#9632; Expenses</span>
+      </div>
+      <svg viewBox="0 0 ${chartW} ${chartH}" preserveAspectRatio="none" style="width:100%;height:${chartH}px">
+        <polygon points="${incFill}" fill="rgba(76,175,130,0.1)" />
+        <polyline points="${incPts.join(' ')}" fill="none" stroke="var(--green)" stroke-width="0.6" />
+        <polygon points="${expFill}" fill="rgba(224,92,92,0.1)" />
+        <polyline points="${expPts.join(' ')}" fill="none" stroke="var(--red)" stroke-width="0.6" />
+        ${months.map((m, i) => {
+          const x = pad + (i / (months.length - 1)) * usableW;
+          const yI = pad + (1 - m.income / maxVal) * usableH;
+          const yE = pad + (1 - m.expenses / maxVal) * usableH;
+          return `<circle cx="${x}" cy="${yI}" r="0.8" fill="var(--green)" /><circle cx="${x}" cy="${yE}" r="0.8" fill="var(--red)" />`;
+        }).join('')}
+      </svg>
+      <div style="display:flex;justify-content:space-between;margin-top:4px">
+        <span style="font-size:10px;color:var(--muted)">${months[0].month}</span>
+        <span style="font-size:10px;color:var(--muted)">${months[months.length - 1].month}</span>
+      </div>`;
+  } else {
+    document.getElementById('trend-chart').innerHTML = '<div class="empty">Not enough data for trend</div>';
+  }
+
+  // ── Cash flow summary table ────────────────────────────────────────────
+  const totalIncome = cf.reduce((s, m) => s + m.income, 0);
+  const totalExpenses = cf.reduce((s, m) => s + m.expenses, 0);
+  const avgSavings = cf.length ? (totalIncome - totalExpenses) / cf.length : 0;
+  document.getElementById('cf-summary').innerHTML = `
+    <div style="display:flex;gap:24px;margin-bottom:16px;flex-wrap:wrap">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">12-Mo Income</div>
+           <div style="font-family:var(--font-serif);font-size:20px;color:var(--green)">${fmtCurrency(totalIncome)}</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">12-Mo Expenses</div>
+           <div style="font-family:var(--font-serif);font-size:20px;color:var(--red)">${fmtCurrency(totalExpenses)}</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Avg Monthly Savings</div>
+           <div style="font-family:var(--font-serif);font-size:20px;color:var(--accent)">${fmtCurrency(avgSavings)}</div></div>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th><th>Rate</th></tr></thead>
+      <tbody>${cf.map(m => {
+        const net = m.income - m.expenses;
+        const rate = m.income > 0 ? Math.round((net / m.income) * 100) : 0;
+        return `<tr>
+          <td style="font-weight:500">${m.month}</td>
+          <td class="pos">${fmtCurrency(m.income)}</td>
+          <td class="neg">${fmtCurrency(m.expenses)}</td>
+          <td class="${net >= 0 ? 'pos' : 'neg'}" style="font-weight:600">${fmtCurrency(net)}</td>
+          <td style="color:var(--muted)">${rate}%</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+})();
+</script>
+{% endblock %}

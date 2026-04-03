@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div id="alerts-area"></div>
+<div class="stats-grid" id="stats-grid">
+  <div class="loading"><div class="spinner"></div></div>
+</div>
+
+<div class="grid-main-side">
+  <div class="card">
+    <div class="card-title">Cash Flow — Last 6 Months</div>
+    <div id="cashflow-chart"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Accounts</div>
+    <div id="accounts-list"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-title">Net Worth — 12 Month Trend</div>
+  <div id="nw-chart"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+
+<div class="grid-2" style="margin-top:16px">
+  <div class="card">
+    <div class="card-title">Recent Transactions</div>
+    <div id="recent-txns"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Budget — This Month</div>
+    <div id="budget-preview"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  // Load all data in parallel
+  const [s, cf, accts, txns, cats, nw, alerts] = await Promise.all([
+    apiFetch('/api/summary').catch(() => null),
+    apiFetch('/api/cashflow').catch(() => []),
+    apiFetch('/api/accounts').catch(() => []),
+    apiFetch('/api/transactions?limit=8').catch(() => []),
+    apiFetch('/api/budget').catch(() => []),
+    apiFetch('/api/networth').catch(() => []),
+    apiFetch('/api/alerts').catch(() => [])
+  ]);
+
+  // ── Alerts ───────────────────────────────────────────────────────────────
+  if (alerts.length) {
+    const colors = { warning: 'var(--red)', info: 'var(--blue)' };
+    const icons = { over_budget: '&#9888;', near_budget: '&#8505;', large_transaction: '&#9733;', overdue_bill: '&#9200;' };
+    document.getElementById('alerts-area').innerHTML = `
+      <div style="margin-bottom:16px;display:flex;flex-direction:column;gap:6px">
+        ${alerts.slice(0, 8).map(a => `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-left:3px solid ${colors[a.severity] || colors.info};border-radius:8px;font-size:13px">
+          <span style="color:${colors[a.severity] || colors.info}">${icons[a.type] || '&#8505;'}</span>
+          <span>${escHtml(a.message)}</span>
+        </div>`).join('')}
+      </div>`;
+  }
+
+  // ── Stats ────────────────────────────────────────────────────────────────
+  if (s) {
+    document.getElementById('stats-grid').innerHTML = `
+      <div class="stat-card gold"><div class="stat-label">Net Worth</div><div class="stat-value">${fmtCurrency(s.net_worth)}</div><div class="stat-sub">All accounts combined</div></div>
+      <div class="stat-card green"><div class="stat-label">Monthly Income</div><div class="stat-value">${fmtCurrency(s.monthly_income)}</div><div class="stat-sub">This month</div></div>
+      <div class="stat-card red"><div class="stat-label">Monthly Expenses</div><div class="stat-value">${fmtCurrency(s.monthly_expenses)}</div><div class="stat-sub">This month</div></div>
+      <div class="stat-card blue"><div class="stat-label">Cash & Savings</div><div class="stat-value">${fmtCurrency(s.cash)}</div><div class="stat-sub">Liquid assets</div></div>
+      <div class="stat-card purple"><div class="stat-label">Investments</div><div class="stat-value">${fmtCurrency(s.investments)}</div><div class="stat-sub">Brokerage + IRA</div></div>
+      <div class="stat-card ${s.monthly_savings >= 0 ? 'green' : 'red'}"><div class="stat-label">Monthly Savings</div><div class="stat-value ${s.monthly_savings >= 0 ? 'pos' : 'neg'}">${fmtCurrency(s.monthly_savings)}</div><div class="stat-sub">Income − Expenses</div></div>
+    `;
+  } else { showError(document.getElementById('stats-grid')); }
+
+  // ── Cash Flow Chart ──────────────────────────────────────────────────────
+  if (cf.length) {
+    const last6 = cf.slice(0, 6).reverse();
+    const maxVal = Math.max(...last6.flatMap(m => [m.income, m.expenses])) || 1;
+    const barsHtml = last6.map(m => {
+      const ih = Math.round((m.income / maxVal) * 110);
+      const eh = Math.round((m.expenses / maxVal) * 110);
+      const label = m.month ? m.month.slice(5) + '/' + m.month.slice(2,4) : '';
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+        <div style="display:flex;align-items:flex-end;gap:2px;height:110px">
+          <div class="bar bar-income" style="width:14px;height:${ih}px" title="Income: ${fmtCurrency(m.income)}"></div>
+          <div class="bar bar-expense" style="width:14px;height:${eh}px" title="Expenses: ${fmtCurrency(m.expenses)}"></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted)">${label}</div>
+      </div>`;
+    }).join('');
+    document.getElementById('cashflow-chart').innerHTML = `
+      <div style="display:flex;align-items:flex-end;gap:6px;padding:0 4px;height:130px;margin-bottom:8px">${barsHtml}</div>
+      <div style="display:flex;gap:16px;margin-top:4px">
+        <span style="font-size:11px;color:var(--green)">▮ Income</span>
+        <span style="font-size:11px;color:var(--red)">▮ Expenses</span>
+      </div>`;
+  } else { document.getElementById('cashflow-chart').innerHTML = '<div class="empty">No data</div>'; }
+
+  // ── Accounts List ────────────────────────────────────────────────────────
+  document.getElementById('accounts-list').innerHTML = accts.map(a => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:13.5px;font-weight:500">${escHtml(a.name)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${escHtml(a.institution || '')} · <span class="badge badge-${a.type}">${acctLabel(a.type)}</span></div>
+      </div>
+      <div style="font-size:15px;font-family:var(--font-serif);color:${a.balance < 0 ? 'var(--red)' : 'var(--text)'}">${fmtCurrency(a.balance)}</div>
+    </div>`).join('') || '<div class="empty">No accounts</div>';
+
+  // ── Net Worth Trend ──────────────────────────────────────────────────────
+  if (nw.length >= 2) {
+    const maxNW = Math.max(...nw.map(n => n.net_worth));
+    const minNW = Math.min(...nw.map(n => n.net_worth));
+    const range = maxNW - minNW || 1;
+    const chartH = 140;
+    const points = nw.map((n, i) => {
+      const x = (i / (nw.length - 1)) * 100;
+      const y = chartH - ((n.net_worth - minNW) / range) * (chartH - 20);
+      return `${x},${y}`;
+    });
+    const fillPoints = `0,${chartH} ${points.join(' ')} 100,${chartH}`;
+    const first = nw[0], last = nw[nw.length - 1];
+    const change = last.net_worth - first.net_worth;
+    const pct = first.net_worth !== 0 ? ((change / Math.abs(first.net_worth)) * 100).toFixed(1) : '0.0';
+
+    document.getElementById('nw-chart').innerHTML = `
+      <div style="display:flex;gap:32px;margin-bottom:16px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Current</div>
+          <div style="font-family:var(--font-serif);font-size:24px;color:var(--accent2)">${fmtCurrency(last.net_worth)}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">12-Mo Change</div>
+          <div style="font-family:var(--font-serif);font-size:24px" class="${change >= 0 ? 'pos' : 'neg'}">${change >= 0 ? '+' : ''}${fmtCurrency(change)} (${change >= 0 ? '+' : ''}${pct}%)</div>
+        </div>
+      </div>
+      <svg viewBox="0 0 100 ${chartH}" preserveAspectRatio="none" style="width:100%;height:${chartH}px">
+        <polygon points="${fillPoints}" fill="url(#nwGrad)" />
+        <polyline points="${points.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="0.5" />
+        <defs><linearGradient id="nwGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>
+          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+        </linearGradient></defs>
+      </svg>
+      <div style="display:flex;justify-content:space-between;margin-top:4px">
+        <span style="font-size:10px;color:var(--muted)">${first.date}</span>
+        <span style="font-size:10px;color:var(--muted)">${last.date}</span>
+      </div>`;
+  } else { document.getElementById('nw-chart').innerHTML = '<div class="empty">Not enough data for trend</div>'; }
+
+  // ── Recent Transactions ──────────────────────────────────────────────────
+  document.getElementById('recent-txns').innerHTML = txns.map(t => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(42,48,69,0.4)">
+      <div>
+        <div style="font-size:13px;font-weight:500">${escHtml(t.description)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${fmtShortDate(t.date)} · ${escHtml(t.category)}</div>
+      </div>
+      <div style="font-size:13.5px;font-weight:600" class="${t.amount >= 0 ? 'pos' : 'neg'}">${t.amount >= 0 ? '+' : ''}${fmtCurrency(t.amount)}</div>
+    </div>`).join('') || '<div class="empty">No transactions</div>';
+
+  // ── Budget Preview ───────────────────────────────────────────────────────
+  document.getElementById('budget-preview').innerHTML = cats.slice(0, 7).map(c => {
+    const pct = c.budgeted > 0 ? Math.min(Math.round((c.spent / c.budgeted) * 100), 120) : 0;
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:12.5px">${c.icon} ${escHtml(c.category)}</span>
+        <span style="font-size:11px;color:var(--muted)">${fmtCurrency(c.spent)} / ${fmtCurrency(c.budgeted)}</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%;background:${progressColor(pct)}"></div></div>
+    </div>`;
+  }).join('') || '<div class="empty">No budget categories</div>';
+})();
+</script>
+{% endblock %}

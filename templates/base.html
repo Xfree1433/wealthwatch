@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WealthWatch — {% block title %}Dashboard{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon-192.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#c9a84c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}">
+</head>
+<body>
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-mark">W</span>
+                <div class="logo-text">
+                    <span class="logo-name">WealthWatch</span>
+                    <span class="logo-sub">by PF9</span>
+                </div>
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="nav-item {% if active == 'dashboard' %}active{% endif %}">
+                <span class="nav-icon">⬡</span><span>Dashboard</span>
+            </a>
+            <a href="/accounts" class="nav-item {% if active == 'accounts' %}active{% endif %}">
+                <span class="nav-icon">◫</span><span>Accounts</span>
+            </a>
+            <a href="/transactions" class="nav-item {% if active == 'transactions' %}active{% endif %}">
+                <span class="nav-icon">⇄</span><span>Transactions</span>
+            </a>
+            <a href="/cashflow" class="nav-item {% if active == 'cashflow' %}active{% endif %}">
+                <span class="nav-icon">∿</span><span>Cash Flow</span>
+            </a>
+            <a href="/investments" class="nav-item {% if active == 'investments' %}active{% endif %}">
+                <span class="nav-icon">◆</span><span>Investments</span>
+            </a>
+            <div class="nav-section-label">Planning</div>
+            <a href="/budget" class="nav-item {% if active == 'budget' %}active{% endif %}">
+                <span class="nav-icon">▦</span><span>Budget</span>
+            </a>
+            <a href="/goals" class="nav-item {% if active == 'goals' %}active{% endif %}">
+                <span class="nav-icon">◎</span><span>Goals</span>
+            </a>
+            <a href="/recurring" class="nav-item {% if active == 'recurring' %}active{% endif %}">
+                <span class="nav-icon">↻</span><span>Recurring</span>
+            </a>
+            <a href="/reports" class="nav-item {% if active == 'reports' %}active{% endif %}">
+                <span class="nav-icon">◈</span><span>Reports</span>
+            </a>
+            <div class="nav-section-label">Settings</div>
+            <a href="/rules" class="nav-item {% if active == 'rules' %}active{% endif %}">
+                <span class="nav-icon">⚙</span><span>Rules</span>
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="user-chip">
+                <div class="user-avatar">{{ user_name[:1] | upper }}</div>
+                <div class="user-info">
+                    <span class="user-name">{{ user_name }}</span>
+                    <span class="user-role">Household</span>
+                </div>
+            </div>
+            <a href="/logout" style="display:block;text-align:center;margin-top:8px;font-size:11px;color:var(--muted);text-decoration:none">Sign Out</a>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+                <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+            </div>
+            <div class="topbar-right" style="display:flex;align-items:center;gap:12px">
+                {% if license and license.demo %}
+                <a href="/rules" style="text-decoration:none" class="date-badge" style="cursor:pointer;border-color:{% if license.expired %}var(--red){% else %}var(--accent){% endif %}">
+                    {% if license.expired %}Trial Expired{% else %}Demo — {{ license.days_remaining }} days left{% endif %}
+                </a>
+                {% endif %}
+                <button class="btn-icon" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode" style="font-size:18px">&#9790;</button>
+                <span class="date-badge" id="today-date"></span>
+            </div>
+        </header>
+        <div class="content">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js', { scope: '/' }).catch(() => {});
+      }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

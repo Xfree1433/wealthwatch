@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Budget{% endblock %}
+{% block page_title %}Budget{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="budget-stats"></div>
+<div class="action-bar">
+  <div class="card-title" style="margin:0">Category Breakdown — This Month</div>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-secondary" onclick="doRollover()">Calculate Rollover</button>
+    <button class="btn btn-primary" onclick="openBudgetModal()">+ Add Category</button>
+  </div>
+</div>
+<div class="card" style="margin-top:4px">
+  <div id="budget-list"></div>
+</div>
+<div id="budget-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allBudgets = [];
+
+function renderBudgets() {
+  const cats = allBudgets;
+  const totalEffective = cats.reduce((s, c) => s + (c.effective_budget || c.budgeted), 0);
+  const totalSpent = cats.reduce((s, c) => s + c.spent, 0);
+  const totalRollover = cats.reduce((s, c) => s + (c.rollover || 0), 0);
+  const over = cats.filter(c => c.spent > (c.effective_budget || c.budgeted)).length;
+  document.getElementById('budget-stats').innerHTML = `
+    <div class="stat-card blue"><div class="stat-label">Effective Budget</div><div class="stat-value">${fmtCurrency(totalEffective)}</div><div class="stat-sub">${totalRollover > 0 ? '+'+fmtCurrency(totalRollover)+' rollover' : 'No rollover'}</div></div>
+    <div class="stat-card ${totalSpent > totalEffective ? 'red' : 'green'}"><div class="stat-label">Total Spent</div><div class="stat-value">${fmtCurrency(totalSpent)}</div></div>
+    <div class="stat-card ${over > 0 ? 'red' : 'green'}"><div class="stat-label">Over Budget</div><div class="stat-value">${over} categor${over === 1 ? 'y' : 'ies'}</div></div>
+    <div class="stat-card gold"><div class="stat-label">Remaining</div><div class="stat-value">${fmtCurrency(totalEffective - totalSpent)}</div></div>
+  `;
+  document.getElementById('budget-list').innerHTML = cats.map(c => {
+    const eff = c.effective_budget || c.budgeted;
+    const pct = eff > 0 ? Math.min(Math.round((c.spent / eff) * 100), 120) : 0;
+    const remaining = eff - c.spent;
+    const hasRollover = (c.rollover || 0) > 0;
+    return `<div style="padding:14px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">${c.icon}</span>
+          <div>
+            <div style="font-size:14px;font-weight:500">${escHtml(c.category)}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:1px">${pct}% used${hasRollover ? ' · +'+fmtCurrency(c.rollover)+' rollover' : ''}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="text-align:right">
+            <div style="font-size:14px;font-weight:600;color:${pct >= 100 ? 'var(--red)' : 'var(--text)'}">${fmtCurrency(c.spent)}</div>
+            <div style="font-size:11px;color:var(--muted)">of ${fmtCurrency(eff)}</div>
+          </div>
+          <div>
+            <button class="btn-icon" onclick="openBudgetModal(${c.id})" title="Edit">&#9998;</button>
+            <button class="btn-icon" onclick="deleteBudget(${c.id}, '${escAttr(c.category)}')" title="Delete" style="color:var(--red)">&#10005;</button>
+          </div>
+        </div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%;background:${progressColor(pct)}"></div></div>
+      <div style="font-size:11px;color:${remaining < 0 ? 'var(--red)' : 'var(--muted)'};margin-top:4px">
+        ${remaining < 0 ? '&#9888; ' + fmtCurrency(Math.abs(remaining)) + ' over budget' : fmtCurrency(remaining) + ' remaining'}
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">No budget categories. Add one to get started.</div>';
+}
+
+function openBudgetModal(editId) {
+  const cat = editId ? allBudgets.find(c => c.id === editId) : null;
+  const title = cat ? 'Edit Category' : 'Add Category';
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Category Name</label>
+      <input class="form-input" id="bud-category" value="${cat ? cat.category : ''}" placeholder="e.g. Groceries">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Monthly Budget</label>
+      <input class="form-input" id="bud-budgeted" type="number" step="0.01" value="${cat ? cat.budgeted : ''}">
+    </div>
+    ${cat ? `<div style="font-size:12px;color:var(--muted);margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px">
+      Spent this month: <strong style="color:var(--text)">${fmtCurrency(cat.spent)}</strong> — auto-calculated from transactions
+    </div>` : ''}
+    <div class="form-group">
+      <label class="form-label">Icon (emoji)</label>
+      <input class="form-input" id="bud-icon" value="${cat ? cat.icon : ''}" placeholder="e.g. &#x1F6D2;" style="font-size:18px">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('bud-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveBudget(${editId || 'null'})">${cat ? 'Save Changes' : 'Add Category'}</button>`;
+  document.getElementById('budget-modal-root').innerHTML = modalShell('bud-modal', title, body, footer);
+  openModal('bud-modal');
+}
+
+async function saveBudget(editId) {
+  const data = {
+    category: document.getElementById('bud-category').value.trim(),
+    budgeted: parseFloat(document.getElementById('bud-budgeted').value) || 0,
+    icon: document.getElementById('bud-icon').value.trim() || '💰'
+  };
+  if (!data.category) return toast('Category name is required.', 'error');
+  try {
+    if (editId) await apiPut('/api/budget/' + editId, data);
+    else await apiPost('/api/budget', data);
+    closeModal('bud-modal');
+    toast(editId ? 'Category updated' : 'Category added');
+    await loadBudgets();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteBudget(id, name) {
+  confirmDelete(name, async () => {
+    await apiDelete('/api/budget/' + id);
+    toast('Category deleted');
+    await loadBudgets();
+  });
+}
+
+async function doRollover() {
+  try {
+    await apiPost('/api/budget/rollover', {});
+    toast('Rollover calculated from last month');
+    await loadBudgets();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function loadBudgets() {
+  allBudgets = await apiFetch('/api/budget');
+  renderBudgets();
+}
+
+loadBudgets();
+</script>
+{% endblock %}

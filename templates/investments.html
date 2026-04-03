@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Investments{% endblock %}
+{% block page_title %}Investments{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="inv-stats"></div>
+<div class="grid-2" style="margin-bottom:16px">
+  <div class="card">
+    <div class="card-title">Asset Allocation</div>
+    <div id="alloc-chart"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Performance Summary</div>
+    <div id="perf-summary"></div>
+  </div>
+</div>
+<div class="action-bar">
+  <div class="card-title" style="margin:0">Holdings</div>
+  <button class="btn btn-primary" onclick="openHoldingModal()">+ Add Holding</button>
+</div>
+<div class="card">
+  <div id="holdings-table"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+<div id="holding-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allHoldings = [], invAccounts = [];
+let invSortKey = 'market_value', invSortDir = 'desc';
+const ALLOC_COLORS = ['#c9a84c','#4caf82','#5c9be0','#e05c5c','#9b74d4','#e08a5c','#e8c97a'];
+const ASSET_LABELS = { stock:'Stocks', bond:'Bonds', etf:'ETFs', mutual_fund:'Mutual Funds', crypto:'Crypto', cash:'Cash', other:'Other' };
+
+function setInvSort(k, d) { invSortKey = k; invSortDir = d; renderHoldings(); }
+
+function renderHoldings() {
+  const h = allHoldings;
+  const totalValue = h.reduce((s, x) => s + x.market_value, 0);
+  const totalCost = h.reduce((s, x) => s + x.cost_basis, 0);
+  const totalGL = totalValue - totalCost;
+  const totalPct = totalCost > 0 ? ((totalGL / totalCost) * 100).toFixed(1) : '0.0';
+
+  document.getElementById('inv-stats').innerHTML = `
+    <div class="stat-card gold"><div class="stat-label">Total Portfolio</div><div class="stat-value">${fmtCurrency(totalValue)}</div></div>
+    <div class="stat-card ${totalGL >= 0 ? 'green' : 'red'}"><div class="stat-label">Total Gain/Loss</div><div class="stat-value ${totalGL >= 0 ? 'pos' : 'neg'}">${totalGL >= 0 ? '+' : ''}${fmtCurrency(totalGL)}</div><div class="stat-sub">${totalGL >= 0 ? '+' : ''}${totalPct}%</div></div>
+    <div class="stat-card blue"><div class="stat-label">Cost Basis</div><div class="stat-value">${fmtCurrency(totalCost)}</div></div>
+    <div class="stat-card purple"><div class="stat-label">Holdings</div><div class="stat-value">${h.length}</div></div>
+  `;
+
+  // Allocation pie
+  const byClass = {};
+  h.forEach(x => { byClass[x.asset_class] = (byClass[x.asset_class] || 0) + x.market_value; });
+  const classes = Object.entries(byClass).sort((a, b) => b[1] - a[1]);
+  if (classes.length && totalValue > 0) {
+    let cum = 0;
+    const slices = classes.map(([cls, val], i) => {
+      const pct = (val / totalValue) * 100;
+      const start = cum; cum += pct;
+      return { cls, val, pct, start, color: ALLOC_COLORS[i % ALLOC_COLORS.length] };
+    });
+    const grad = slices.map(s => `${s.color} ${s.start}% ${s.start + s.pct}%`).join(', ');
+    document.getElementById('alloc-chart').innerHTML = `
+      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div style="width:140px;height:140px;border-radius:50%;background:conic-gradient(${grad});flex-shrink:0"></div>
+        <div class="pie-legend">${slices.map(s => `<div class="pie-legend-item">
+          <div class="pie-swatch" style="background:${s.color}"></div>
+          <span style="flex:1">${ASSET_LABELS[s.cls] || s.cls}</span>
+          <span style="color:var(--muted)">${fmtCurrency(s.val)} (${s.pct.toFixed(1)}%)</span>
+        </div>`).join('')}</div>
+      </div>`;
+  } else { document.getElementById('alloc-chart').innerHTML = '<div class="empty">No holdings</div>'; }
+
+  // Performance by account
+  const byAcct = {};
+  h.forEach(x => {
+    if (!byAcct[x.account_name]) byAcct[x.account_name] = { value: 0, cost: 0 };
+    byAcct[x.account_name].value += x.market_value;
+    byAcct[x.account_name].cost += x.cost_basis;
+  });
+  document.getElementById('perf-summary').innerHTML = Object.entries(byAcct).map(([name, d]) => {
+    const gl = d.value - d.cost;
+    const pct = d.cost > 0 ? ((gl / d.cost) * 100).toFixed(1) : '0.0';
+    return `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div><div style="font-weight:500">${escHtml(name)}</div><div style="font-size:11px;color:var(--muted)">${fmtCurrency(d.value)}</div></div>
+      <div style="text-align:right"><div class="${gl >= 0 ? 'pos' : 'neg'}" style="font-weight:600">${gl >= 0 ? '+' : ''}${fmtCurrency(gl)}</div><div style="font-size:11px;color:var(--muted)">${gl >= 0 ? '+' : ''}${pct}%</div></div>
+    </div>`;
+  }).join('') || '<div class="empty">No holdings</div>';
+
+  // Holdings table
+  const sorted = sortBy(h, invSortKey, invSortDir);
+  document.getElementById('holdings-table').innerHTML = sorted.length ? `
+    <table class="data-table">
+      <thead><tr>
+        ${sortHeader('Symbol','symbol',invSortKey,invSortDir,'setInvSort')}
+        <th>Name</th>
+        <th>Account</th>
+        <th>Class</th>
+        ${sortHeader('Shares','shares',invSortKey,invSortDir,'setInvSort')}
+        ${sortHeader('Price','current_price',invSortKey,invSortDir,'setInvSort')}
+        ${sortHeader('Value','market_value',invSortKey,invSortDir,'setInvSort')}
+        ${sortHeader('Gain/Loss','gain_loss',invSortKey,invSortDir,'setInvSort')}
+        <th style="width:80px"></th>
+      </tr></thead>
+      <tbody>${sorted.map(x => `
+        <tr>
+          <td><strong>${escHtml(x.symbol)}</strong></td>
+          <td style="font-size:12px;color:var(--muted)">${escHtml(x.name)}</td>
+          <td style="font-size:12px;color:var(--muted)">${escHtml(x.account_name)}</td>
+          <td><span class="badge badge-investment" style="font-size:10px">${ASSET_LABELS[x.asset_class] || x.asset_class}</span></td>
+          <td>${x.shares}</td>
+          <td>${fmtCurrency(x.current_price)}</td>
+          <td style="font-family:var(--font-serif)">${fmtCurrency(x.market_value)}</td>
+          <td class="${x.gain_loss >= 0 ? 'pos' : 'neg'}" style="font-weight:600">${x.gain_loss >= 0 ? '+' : ''}${fmtCurrency(x.gain_loss)} (${x.gain_pct >= 0 ? '+' : ''}${x.gain_pct}%)</td>
+          <td>
+            <button class="btn-icon" onclick="openHoldingModal(${x.id})" title="Edit">&#9998;</button>
+            <button class="btn-icon" onclick="deleteHolding(${x.id}, '${escAttr(x.symbol)}')" title="Delete" style="color:var(--red)">&#10005;</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : '<div class="empty">No holdings. Add one to start tracking.</div>';
+}
+
+function openHoldingModal(editId) {
+  const h = editId ? allHoldings.find(x => x.id === editId) : null;
+  const title = h ? 'Edit Holding' : 'Add Holding';
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Account</label>
+      <select class="form-select" id="h-account">
+        ${invAccounts.filter(a => a.type === 'investment').map(a => `<option value="${a.id}" ${h && h.account_id === a.id ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Symbol / Ticker</label>
+        <input class="form-input" id="h-symbol" value="${h ? escAttr(h.symbol) : ''}" placeholder="e.g. VTI" style="text-transform:uppercase">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Asset Class</label>
+        <select class="form-select" id="h-class">
+          ${['stock','etf','mutual_fund','bond','crypto','cash','other'].map(c => `<option value="${c}" ${h && h.asset_class === c ? 'selected' : ''}>${ASSET_LABELS[c]}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="h-name" value="${h ? escAttr(h.name) : ''}" placeholder="e.g. Vanguard Total Stock Market ETF">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Shares</label>
+        <input class="form-input" id="h-shares" type="number" step="0.0001" value="${h ? h.shares : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Current Price</label>
+        <input class="form-input" id="h-price" type="number" step="0.01" value="${h ? h.current_price : ''}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cost Basis (total)</label>
+      <input class="form-input" id="h-cost" type="number" step="0.01" value="${h ? h.cost_basis : ''}">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('h-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveHolding(${editId || 'null'})">${h ? 'Save' : 'Add Holding'}</button>`;
+  document.getElementById('holding-modal-root').innerHTML = modalShell('h-modal', title, body, footer);
+  openModal('h-modal');
+}
+
+async function saveHolding(editId) {
+  const data = {
+    account_id: parseInt(document.getElementById('h-account').value),
+    symbol: document.getElementById('h-symbol').value.trim(),
+    name: document.getElementById('h-name').value.trim(),
+    shares: parseFloat(document.getElementById('h-shares').value) || 0,
+    current_price: parseFloat(document.getElementById('h-price').value) || 0,
+    cost_basis: parseFloat(document.getElementById('h-cost').value) || 0,
+    asset_class: document.getElementById('h-class').value
+  };
+  if (!data.symbol || !data.name) return toast('Symbol and name are required.', 'error');
+  try {
+    if (editId) await apiPut('/api/holdings/' + editId, data);
+    else await apiPost('/api/holdings', data);
+    closeModal('h-modal');
+    toast(editId ? 'Holding updated' : 'Holding added');
+    await loadHoldings();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteHolding(id, sym) {
+  confirmDelete(sym, async () => {
+    await apiDelete('/api/holdings/' + id);
+    toast('Holding deleted');
+    await loadHoldings();
+  });
+}
+
+async function loadHoldings() {
+  [allHoldings, invAccounts] = await Promise.all([apiFetch('/api/holdings'), apiFetch('/api/accounts')]);
+  renderHoldings();
+}
+
+loadHoldings();
+</script>
+{% endblock %}

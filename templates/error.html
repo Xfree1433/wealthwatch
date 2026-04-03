@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WealthWatch — {{ code }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+      body { justify-content: center; align-items: center; }
+      .error-card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 48px 40px; width: 90%; max-width: 420px; text-align: center;
+      }
+      .error-code { font-family: var(--font-serif); font-size: 72px; color: var(--accent); line-height: 1; }
+      .error-msg { font-size: 16px; color: var(--muted); margin: 16px 0 24px; }
+      .error-link { color: var(--accent2); text-decoration: none; font-weight: 500; }
+      .error-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="error-card">
+        <div class="error-code">{{ code }}</div>
+        <div class="error-msg">{{ message }}</div>
+        <a href="/dashboard" class="error-link">Back to Dashboard</a>
+    </div>
+</body>
+</html>

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block page_title %}Accounts{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="acct-summary"></div>
+<div class="action-bar">
+  <div></div>
+  <button class="btn btn-primary" onclick="openAccountModal()">+ Add Account</button>
+</div>
+<div class="card">
+  <div id="accounts-table"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+<div id="account-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allAccounts = [];
+let acctSortKey = 'type', acctSortDir = 'asc';
+
+function setAcctSort(key, dir) { acctSortKey = key; acctSortDir = dir; renderAccounts(); }
+
+function renderAccounts() {
+  const accts = sortBy(allAccounts, acctSortKey, acctSortDir);
+  const totals = { asset: 0, liability: 0 };
+  accts.forEach(a => {
+    if (['credit','loan'].includes(a.type)) totals.liability += Math.abs(a.balance);
+    else totals.asset += a.balance;
+  });
+  document.getElementById('acct-summary').innerHTML = `
+    <div class="stat-card gold"><div class="stat-label">Net Worth</div><div class="stat-value">${fmtCurrency(totals.asset - totals.liability)}</div></div>
+    <div class="stat-card green"><div class="stat-label">Total Assets</div><div class="stat-value">${fmtCurrency(totals.asset)}</div></div>
+    <div class="stat-card red"><div class="stat-label">Total Liabilities</div><div class="stat-value">${fmtCurrency(totals.liability)}</div></div>
+  `;
+  document.getElementById('accounts-table').innerHTML = `
+    <table class="data-table">
+      <thead><tr>
+        ${sortHeader('Account','name',acctSortKey,acctSortDir,'setAcctSort')}
+        ${sortHeader('Institution','institution',acctSortKey,acctSortDir,'setAcctSort')}
+        ${sortHeader('Type','type',acctSortKey,acctSortDir,'setAcctSort')}
+        ${sortHeader('Balance','balance',acctSortKey,acctSortDir,'setAcctSort')}
+        <th>Last Updated</th>
+        <th style="width:80px"></th>
+      </tr></thead>
+      <tbody>${accts.map(a => `
+        <tr>
+          <td><strong>${escHtml(a.name)}</strong></td>
+          <td>${escHtml(a.institution || '—')}</td>
+          <td><span class="badge badge-${a.type}">${acctLabel(a.type)}</span></td>
+          <td style="text-align:right;font-family:var(--font-serif);font-size:16px" class="${a.balance < 0 ? 'neg' : ''}">${fmtCurrency(a.balance)}</td>
+          <td style="color:var(--muted);font-size:12px">${a.last_updated || '—'}</td>
+          <td>
+            <button class="btn-icon" onclick="openAccountModal(${a.id})" title="Edit">&#9998;</button>
+            <button class="btn-icon" onclick="deleteAccount(${a.id}, '${escAttr(a.name)}')" title="Delete" style="color:var(--red)">&#10005;</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openAccountModal(editId) {
+  const acct = editId ? allAccounts.find(a => a.id === editId) : null;
+  const title = acct ? 'Edit Account' : 'Add Account';
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Account Name</label>
+      <input class="form-input" id="acct-name" value="${acct ? escAttr(acct.name) : ''}" placeholder="e.g. Chase Checking">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Institution</label>
+        <input class="form-input" id="acct-institution" value="${acct ? escAttr(acct.institution || '') : ''}" placeholder="e.g. Chase">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-select" id="acct-type">
+          ${['checking','savings','credit','investment','real_estate','loan'].map(t =>
+            `<option value="${t}" ${acct && acct.type === t ? 'selected' : ''}>${acctLabel(t)}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Balance</label>
+      <input class="form-input" id="acct-balance" type="number" step="0.01" value="${acct ? acct.balance : '0'}">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('acct-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveAccount(${editId || 'null'})">${acct ? 'Save Changes' : 'Add Account'}</button>`;
+  document.getElementById('account-modal-root').innerHTML = modalShell('acct-modal', title, body, footer);
+  openModal('acct-modal');
+}
+
+async function saveAccount(editId) {
+  const data = {
+    name: document.getElementById('acct-name').value.trim(),
+    institution: document.getElementById('acct-institution').value.trim(),
+    type: document.getElementById('acct-type').value,
+    balance: parseFloat(document.getElementById('acct-balance').value) || 0
+  };
+  if (!data.name) return toast('Account name is required.', 'error');
+  try {
+    if (editId) await apiPut('/api/accounts/' + editId, data);
+    else await apiPost('/api/accounts', data);
+    closeModal('acct-modal');
+    toast(editId ? 'Account updated' : 'Account added');
+    await loadAccounts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteAccount(id, name) {
+  confirmDelete(name, async () => {
+    await apiDelete('/api/accounts/' + id);
+    toast('Account deleted');
+    await loadAccounts();
+  });
+}
+
+async function loadAccounts() {
+  allAccounts = await apiFetch('/api/accounts');
+  renderAccounts();
+}
+
+loadAccounts();
+</script>
+{% endblock %}

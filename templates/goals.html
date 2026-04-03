@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Goals{% endblock %}
+{% block page_title %}Goals{% endblock %}
+
+{% block content %}
+<div class="action-bar">
+  <div></div>
+  <button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button>
+</div>
+<div id="goals-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
+  <div class="loading"><div class="spinner"></div></div>
+</div>
+<div id="goal-modal-root"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allGoals = [];
+const GOAL_COLORS = ['#4CAF50','#2196F3','#FF9800','#9C27B0','#E91E63','#00BCD4','#FF5722','#607D8B'];
+
+function renderGoals() {
+  document.getElementById('goals-grid').innerHTML = allGoals.map(g => {
+    const pct = Math.min(Math.round((g.current_amount / g.target_amount) * 100), 100);
+    const remaining = g.target_amount - g.current_amount;
+    const daysLeft = g.target_date
+      ? Math.ceil((new Date(g.target_date) - new Date()) / (1000 * 60 * 60 * 24))
+      : null;
+    return `<div class="card" style="border-top:3px solid ${g.color}">
+      <div style="display:flex;justify-content:space-between;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:28px">${g.icon}</span>
+          <div>
+            <div style="font-family:var(--font-serif);font-size:18px">${g.name}</div>
+            ${g.target_date ? `<div style="font-size:11px;color:var(--muted)">Target: ${fmtDate(g.target_date)}</div>` : ''}
+          </div>
+        </div>
+        <div>
+          <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">&#9998;</button>
+          <button class="btn-icon" onclick="deleteGoal(${g.id}, '${g.name.replace(/'/g, "\\'")}')" title="Delete" style="color:var(--red)">&#10005;</button>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:22px;font-family:var(--font-serif)">${fmtCurrency(g.current_amount)}</span>
+        <span style="font-size:13px;color:var(--muted);align-self:flex-end">of ${fmtCurrency(g.target_amount)}</span>
+      </div>
+      <div class="progress-bar" style="height:8px;margin-bottom:8px">
+        <div class="progress-fill" style="width:${pct}%;background:${g.color}"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span style="font-size:13px;font-weight:600;color:${g.color}">${pct}% complete</span>
+        <span style="font-size:12px;color:var(--muted)">${fmtCurrency(remaining)} to go</span>
+      </div>
+      ${daysLeft !== null ? `<div style="margin-top:8px;font-size:11px;color:var(--muted)">${daysLeft > 0 ? daysLeft + ' days remaining' : 'Past target date'}</div>` : ''}
+    </div>`;
+  }).join('') || '<div class="empty">No goals yet. Add one to start tracking.</div>';
+}
+
+function openGoalModal(editId) {
+  const g = editId ? allGoals.find(x => x.id === editId) : null;
+  const title = g ? 'Edit Goal' : 'Add Goal';
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Goal Name</label>
+      <input class="form-input" id="goal-name" value="${g ? g.name : ''}" placeholder="e.g. Emergency Fund">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Target Amount</label>
+        <input class="form-input" id="goal-target" type="number" step="0.01" value="${g ? g.target_amount : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Current Amount</label>
+        <input class="form-input" id="goal-current" type="number" step="0.01" value="${g ? g.current_amount : '0'}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Target Date</label>
+        <input class="form-input" id="goal-date" type="date" value="${g ? (g.target_date || '') : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon (emoji)</label>
+        <input class="form-input" id="goal-icon" value="${g ? g.icon : ''}" placeholder="e.g. &#x1F3AF;" style="font-size:18px">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${GOAL_COLORS.map(c => `<button type="button" class="color-swatch" onclick="document.getElementById('goal-color').value='${c}';document.querySelectorAll('.color-swatch').forEach(s=>s.style.outline='none');this.style.outline='2px solid var(--text)'"
+          style="width:32px;height:32px;border-radius:8px;border:none;cursor:pointer;background:${c};outline:${g && g.color === c ? '2px solid var(--text)' : 'none'}"></button>`).join('')}
+      </div>
+      <input type="hidden" id="goal-color" value="${g ? g.color : GOAL_COLORS[0]}">
+    </div>`;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal('goal-modal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveGoal(${editId || 'null'})">${g ? 'Save Changes' : 'Add Goal'}</button>`;
+  document.getElementById('goal-modal-root').innerHTML = modalShell('goal-modal', title, body, footer);
+  openModal('goal-modal');
+}
+
+async function saveGoal(editId) {
+  const data = {
+    name: document.getElementById('goal-name').value.trim(),
+    target_amount: parseFloat(document.getElementById('goal-target').value) || 0,
+    current_amount: parseFloat(document.getElementById('goal-current').value) || 0,
+    target_date: document.getElementById('goal-date').value,
+    icon: document.getElementById('goal-icon').value.trim() || '🎯',
+    color: document.getElementById('goal-color').value || '#4CAF50'
+  };
+  if (!data.name || !data.target_amount) return toast('Name and target amount are required.', 'error');
+  try {
+    if (editId) await apiPut('/api/goals/' + editId, data);
+    else await apiPost('/api/goals', data);
+    closeModal('goal-modal');
+    toast(editId ? 'Goal updated' : 'Goal added');
+    await loadGoals();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteGoal(id, name) {
+  confirmDelete(name, async () => {
+    await apiDelete('/api/goals/' + id);
+    toast('Goal deleted');
+    await loadGoals();
+  });
+}
+
+async function loadGoals() {
+  allGoals = await apiFetch('/api/goals');
+  renderGoals();
+}
+
+loadGoals();
+</script>
+{% endblock %}

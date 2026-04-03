@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow{% endblock %}
+{% block page_title %}Cash Flow{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="cf-stats"></div>
+<div class="card" style="margin-top:4px">
+  <div class="card-title">Monthly Income vs Expenses</div>
+  <div id="cf-table"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  const cf = await apiFetch('/api/cashflow');
+  const recent = cf[0] || {};
+  const net = (recent.income || 0) - (recent.expenses || 0);
+  document.getElementById('cf-stats').innerHTML = `
+    <div class="stat-card green"><div class="stat-label">Income (Latest Mo.)</div><div class="stat-value">${fmtCurrency(recent.income || 0)}</div></div>
+    <div class="stat-card red"><div class="stat-label">Expenses (Latest Mo.)</div><div class="stat-value">${fmtCurrency(recent.expenses || 0)}</div></div>
+    <div class="stat-card ${net >= 0 ? 'gold' : 'red'}"><div class="stat-label">Net (Latest Mo.)</div><div class="stat-value ${net >= 0 ? 'pos' : 'neg'}">${fmtCurrency(net)}</div></div>
+  `;
+  const maxVal = Math.max(...cf.flatMap(m => [m.income, m.expenses])) || 1;
+  document.getElementById('cf-table').innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th><th>Savings Rate</th><th>Chart</th></tr></thead>
+      <tbody>${cf.map(m => {
+        const n = m.income - m.expenses;
+        const rate = m.income > 0 ? Math.round((n / m.income) * 100) : 0;
+        const ih = Math.round((m.income / maxVal) * 80);
+        const eh = Math.round((m.expenses / maxVal) * 80);
+        return `<tr>
+          <td style="font-weight:500">${m.month}</td>
+          <td class="pos">${fmtCurrency(m.income)}</td>
+          <td class="neg">${fmtCurrency(m.expenses)}</td>
+          <td class="${n >= 0 ? 'pos' : 'neg'}">${fmtCurrency(n)}</td>
+          <td style="color:var(--muted)">${rate}%</td>
+          <td><div style="display:flex;align-items:flex-end;gap:2px;height:80px">
+            <div class="bar bar-income" style="width:12px;height:${ih}px"></div>
+            <div class="bar bar-expense" style="width:12px;height:${eh}px"></div>
+          </div></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+})();
+</script>
+{% endblock %}
