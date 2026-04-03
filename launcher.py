@@ -16,11 +16,11 @@ if getattr(sys, 'frozen', False):
 
 from app import create_app
 
-PORT = 5050
+PORT = 5100
 HOST = '127.0.0.1'
 
 
-def find_open_port(start=5050, end=5100):
+def find_open_port(start=5100, end=5150):
     """Find an available port."""
     for port in range(start, end):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
