@@ -12,10 +12,16 @@ a = Analysis(
     pathex=[root],
     binaries=[],
     datas=[
-        (os.path.join(root, 'templates'), 'templates'),
-        (os.path.join(root, 'static'), 'static'),
+        (os.path.join(root, 'app', 'templates'), os.path.join('app', 'templates')),
+        (os.path.join(root, 'app', 'static'), os.path.join('app', 'static')),
     ],
-    hiddenimports=['flask', 'markupsafe', 'jinja2', 'flask.json'],
+    hiddenimports=[
+        'flask', 'markupsafe', 'jinja2', 'flask.json',
+        'app', 'app.extensions', 'app.services', 'app.services.database', 'app.services.licensing',
+        'app.blueprints', 'app.blueprints.auth', 'app.blueprints.dashboard',
+        'app.blueprints.accounts', 'app.blueprints.transactions', 'app.blueprints.reports',
+        'config',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -53,5 +59,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=os.path.join(root, 'static', 'icon-192.png'),
+    icon=os.path.join(root, 'app', 'static', 'icon-192.png'),
 )
