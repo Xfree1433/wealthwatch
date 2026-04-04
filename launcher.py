@@ -3,6 +3,7 @@ WealthWatch Desktop Launcher
 ──────────────────────────────
 Starts the local Flask server and opens the browser.
 Auto-shuts down when the browser tab is closed.
+Single-instance: if already running, opens a new browser tab instead.
 """
 import sys
 import os
@@ -16,14 +17,39 @@ if getattr(sys, 'frozen', False):
     os.chdir(os.path.dirname(sys.executable))
     sys.path.insert(0, os.path.dirname(sys.executable))
 
-from app import create_app
-
 PORT = 5100
 HOST = '127.0.0.1'
+LOCK_PORT = 5099  # Dedicated port for single-instance lock
 
 # Tracks the last time the browser pinged us
 _last_heartbeat = time.time()
 _heartbeat_lock = threading.Lock()
+
+
+def is_already_running():
+    """Check if another instance is running by trying to bind the lock port."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind((HOST, LOCK_PORT))
+        s.listen(1)
+        # Keep socket open for lifetime of process (prevents other instances)
+        return False, s
+    except OSError:
+        return True, None
+
+
+def find_running_port(start=5100, end=5150):
+    """Find which port the existing instance is running on."""
+    for port in range(start, end):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect((HOST, port))
+            s.close()
+            return port
+        except (OSError, ConnectionRefusedError):
+            continue
+    return None
 
 
 def find_open_port(start=5100, end=5150):
@@ -46,6 +72,8 @@ def open_browser(port):
 
 def watchdog():
     """Shut down if no heartbeat received for 30 seconds."""
+    # Give the app 60 seconds to start up before enforcing heartbeats
+    time.sleep(60)
     while True:
         time.sleep(10)
         with _heartbeat_lock:
@@ -55,6 +83,17 @@ def watchdog():
 
 
 def main():
+    # ── Single-instance check ───────────────────────────────────────────
+    already_running, lock_socket = is_already_running()
+    if already_running:
+        # Another instance exists — just open the browser to it
+        port = find_running_port(PORT)
+        if port:
+            webbrowser.open(f'http://{HOST}:{port}')
+        sys.exit(0)
+
+    from app import create_app
+
     port = find_open_port(PORT)
     app = create_app()
 
@@ -68,7 +107,6 @@ def main():
 
     @app.route('/api/shutdown', methods=['POST'])
     def shutdown():
-        # Give a moment for the response to send, then exit
         threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0)), daemon=True).start()
         return '', 204
 
@@ -97,6 +135,8 @@ def main():
     try:
         app.run(host=HOST, port=port, debug=False, use_reloader=False)
     except KeyboardInterrupt:
+        if lock_socket:
+            lock_socket.close()
         print('\nWealthWatch stopped.')
         sys.exit(0)
 
