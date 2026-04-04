@@ -2,7 +2,6 @@
 WealthWatch Desktop Launcher
 ──────────────────────────────
 Starts the local Flask server and opens the browser.
-Auto-shuts down when the browser tab is closed.
 Single-instance: if already running, opens a new browser tab instead.
 """
 import sys
@@ -21,10 +20,6 @@ PORT = 5100
 HOST = '127.0.0.1'
 LOCK_PORT = 5099  # Dedicated port for single-instance lock
 
-# Tracks the last time the browser pinged us
-_last_heartbeat = time.time()
-_heartbeat_lock = threading.Lock()
-
 
 def is_already_running():
     """Check if another instance is running by trying to bind the lock port."""
@@ -32,7 +27,6 @@ def is_already_running():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind((HOST, LOCK_PORT))
         s.listen(1)
-        # Keep socket open for lifetime of process (prevents other instances)
         return False, s
     except OSError:
         return True, None
@@ -70,22 +64,10 @@ def open_browser(port):
     webbrowser.open(f'http://{HOST}:{port}')
 
 
-def watchdog():
-    """Shut down if no activity for 5 minutes (browser tab closed)."""
-    time.sleep(120)  # 2 min grace period for startup + first-run reading
-    while True:
-        time.sleep(15)
-        with _heartbeat_lock:
-            elapsed = time.time() - _last_heartbeat
-        if elapsed > 300:  # 5 minutes of no requests = browser is gone
-            os._exit(0)
-
-
 def main():
     # ── Single-instance check ───────────────────────────────────────────
     already_running, lock_socket = is_already_running()
     if already_running:
-        # Another instance exists — just open the browser to it
         port = find_running_port(PORT)
         if port:
             webbrowser.open(f'http://{HOST}:{port}')
@@ -96,31 +78,35 @@ def main():
     port = find_open_port(PORT)
     app = create_app()
 
-    # ── Keep-alive: reset heartbeat on every request ───────────────────
-    @app.before_request
-    def reset_heartbeat():
-        global _last_heartbeat
-        with _heartbeat_lock:
-            _last_heartbeat = time.time()
-
-    # ── Heartbeat + shutdown routes ──────────────────────────────────────
-    @app.route('/api/heartbeat', methods=['POST'])
-    def heartbeat():
-        return '', 204
-
+    # ── Shutdown route (called only by visibilitychange, not navigation) ─
     @app.route('/api/shutdown', methods=['POST'])
     def shutdown():
-        threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0)), daemon=True).start()
+        # Wait 5 seconds before actually shutting down — if the browser
+        # reconnects (e.g., user reopened tab), cancel the shutdown
+        def delayed_shutdown():
+            time.sleep(5)
+            os._exit(0)
+        threading.Thread(target=delayed_shutdown, daemon=True).start()
         return '', 204
 
-    # ── Inject heartbeat + shutdown JS into every page ───────────────────
+    # ── Inject shutdown JS into every page ───────────────────────────────
     @app.after_request
     def inject_lifecycle_js(response):
         if response.content_type and 'text/html' in response.content_type:
+            # Use visibilitychange + document.hidden to detect tab close,
+            # NOT beforeunload which fires on every navigation
             js = b'''<script>
 (function(){
-    setInterval(function(){fetch('/api/heartbeat',{method:'POST'}).catch(function(){})},10000);
-    window.addEventListener('beforeunload',function(){navigator.sendBeacon('/api/shutdown')});
+    var shutdownTimer = null;
+    document.addEventListener('visibilitychange', function(){
+        if (document.hidden) {
+            shutdownTimer = setTimeout(function(){
+                navigator.sendBeacon('/api/shutdown');
+            }, 30000);
+        } else {
+            if (shutdownTimer) { clearTimeout(shutdownTimer); shutdownTimer = null; }
+        }
+    });
 })();
 </script>'''
             response.data = response.data.replace(b'</body>', js + b'</body>')
@@ -131,8 +117,6 @@ def main():
     print(f'  Running at http://{HOST}:{port}')
     print(f'  Close the browser tab to stop.\n')
 
-    # Start watchdog and browser threads
-    threading.Thread(target=watchdog, daemon=True).start()
     threading.Thread(target=open_browser, args=(port,), daemon=True).start()
 
     try:
