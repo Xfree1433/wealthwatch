@@ -71,14 +71,13 @@ def open_browser(port):
 
 
 def watchdog():
-    """Shut down if no heartbeat received for 30 seconds."""
-    # Give the app 60 seconds to start up before enforcing heartbeats
-    time.sleep(60)
+    """Shut down if no activity for 5 minutes (browser tab closed)."""
+    time.sleep(120)  # 2 min grace period for startup + first-run reading
     while True:
-        time.sleep(10)
+        time.sleep(15)
         with _heartbeat_lock:
             elapsed = time.time() - _last_heartbeat
-        if elapsed > 30:
+        if elapsed > 300:  # 5 minutes of no requests = browser is gone
             os._exit(0)
 
 
@@ -97,12 +96,16 @@ def main():
     port = find_open_port(PORT)
     app = create_app()
 
-    # ── Heartbeat + shutdown routes ──────────────────────────────────────
-    @app.route('/api/heartbeat', methods=['POST'])
-    def heartbeat():
+    # ── Keep-alive: reset heartbeat on every request ───────────────────
+    @app.before_request
+    def reset_heartbeat():
         global _last_heartbeat
         with _heartbeat_lock:
             _last_heartbeat = time.time()
+
+    # ── Heartbeat + shutdown routes ──────────────────────────────────────
+    @app.route('/api/heartbeat', methods=['POST'])
+    def heartbeat():
         return '', 204
 
     @app.route('/api/shutdown', methods=['POST'])
