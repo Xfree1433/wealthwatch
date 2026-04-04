@@ -78,34 +78,44 @@ def main():
     port = find_open_port(PORT)
     app = create_app()
 
-    # ── Shutdown route (called only by visibilitychange, not navigation) ─
+    # ── Pending shutdown management ────────────────────────────────────────
+    _shutdown_timer = [None]  # mutable container for thread reference
+    _shutdown_lock = threading.Lock()
+
+    def cancel_pending_shutdown():
+        with _shutdown_lock:
+            if _shutdown_timer[0] is not None:
+                _shutdown_timer[0] = None
+
+    @app.before_request
+    def on_request():
+        cancel_pending_shutdown()
+
     @app.route('/api/shutdown', methods=['POST'])
     def shutdown():
-        # Wait 5 seconds before actually shutting down — if the browser
-        # reconnects (e.g., user reopened tab), cancel the shutdown
         def delayed_shutdown():
             time.sleep(5)
-            os._exit(0)
-        threading.Thread(target=delayed_shutdown, daemon=True).start()
+            with _shutdown_lock:
+                if _shutdown_timer[0] == threading.current_thread():
+                    os._exit(0)
+        with _shutdown_lock:
+            t = threading.Thread(target=delayed_shutdown, daemon=True)
+            _shutdown_timer[0] = t
+            t.start()
         return '', 204
 
     # ── Inject shutdown JS into every page ───────────────────────────────
     @app.after_request
     def inject_lifecycle_js(response):
         if response.content_type and 'text/html' in response.content_type:
-            # Use visibilitychange + document.hidden to detect tab close,
-            # NOT beforeunload which fires on every navigation
+            # beforeunload fires on tab close AND internal navigation.
+            # Server cancels shutdown if a new request arrives within 5s.
+            # Tab close = no new request = server exits.
+            # Internal nav = new page loads within 1s = shutdown cancelled.
             js = b'''<script>
 (function(){
-    var shutdownTimer = null;
-    document.addEventListener('visibilitychange', function(){
-        if (document.hidden) {
-            shutdownTimer = setTimeout(function(){
-                navigator.sendBeacon('/api/shutdown');
-            }, 30000);
-        } else {
-            if (shutdownTimer) { clearTimeout(shutdownTimer); shutdownTimer = null; }
-        }
+    window.addEventListener('beforeunload', function(){
+        navigator.sendBeacon('/api/shutdown');
     });
 })();
 </script>'''
