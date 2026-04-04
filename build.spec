@@ -15,6 +15,7 @@ a = Analysis(
     datas=[
         (os.path.join(root, 'app', 'templates'), os.path.join('app', 'templates')),
         (os.path.join(root, 'app', 'static'), os.path.join('app', 'static')),
+        (os.path.join(root, 'README.txt'), '.'),
     ],
     hiddenimports=[
         'flask', 'markupsafe', 'jinja2', 'flask.json',
