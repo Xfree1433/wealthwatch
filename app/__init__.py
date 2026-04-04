@@ -35,11 +35,12 @@ def create_app(config_name=None):
     if os.path.exists(pin_file):
         with open(pin_file) as _pf:
             app.config['DEFAULT_PIN'] = _pf.read().strip()
+        app.config['FIRST_RUN'] = False
     else:
         app.config['DEFAULT_PIN'] = secrets.token_hex(3)[:6]
         with open(pin_file, 'w') as _pf:
             _pf.write(app.config['DEFAULT_PIN'])
-        print(f'\n  *** First-run PIN generated: {app.config["DEFAULT_PIN"]} ***\n  Stored in {pin_file}\n')
+        app.config['FIRST_RUN'] = True
 
     # ── CSRF protection ──────────────────────────────────────────────────────
     @app.before_request

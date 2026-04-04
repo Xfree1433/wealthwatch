@@ -18,9 +18,12 @@ def login():
         if pin == current_app.config['DEFAULT_PIN']:
             session['authed'] = True
             session.permanent = True
+            current_app.config['FIRST_RUN'] = False
             return redirect(url_for('dashboard.dashboard'))
         error = 'Invalid PIN. Try again.'
-    return render_template('login.html', error=error)
+    first_run = current_app.config.get('FIRST_RUN', False)
+    pin = current_app.config['DEFAULT_PIN'] if first_run else None
+    return render_template('login.html', error=error, first_run=first_run, generated_pin=pin)
 
 
 @auth_bp.route('/logout')
