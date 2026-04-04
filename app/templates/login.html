@@ -96,6 +96,12 @@
         </form>
         {% if not first_run %}
         <div class="pin-hint">Forgot your PIN? Delete the file <code style="color:var(--accent);font-size:11px;">%APPDATA%\WealthWatch\.pin</code> and restart the app to generate a new one.</div>
+        <div class="shortcut-section" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+            <div class="shortcut-btns">
+                <button class="shortcut-btn" onclick="createShortcut('desktop', this)">Desktop Shortcut</button>
+                <button class="shortcut-btn" onclick="createShortcut('startup', this)">Start with Windows</button>
+            </div>
+        </div>
         {% endif %}
         <div class="login-footer">Plainspoken Foundry Nine LLC</div>
     </div>
