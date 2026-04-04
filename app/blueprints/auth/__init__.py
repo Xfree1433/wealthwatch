@@ -74,3 +74,47 @@ def api_license_activate():
 def api_license_deactivate():
     deactivate_license()
     return jsonify({'ok': True})
+
+
+# ── Shortcut creator ────────────────────────────────────────────────────────
+
+@auth_bp.route('/api/create-shortcut', methods=['POST'])
+@login_required
+def api_create_shortcut():
+    import sys
+    if not getattr(sys, 'frozen', False):
+        return _err('Shortcuts can only be created from the desktop app')
+
+    d = request.get_json() or {}
+    location = d.get('location', 'desktop')
+    exe_path = sys.executable
+
+    try:
+        import subprocess
+        if location == 'desktop':
+            folder = subprocess.check_output(
+                ['powershell', '-Command', '[Environment]::GetFolderPath("Desktop")'],
+                text=True
+            ).strip()
+        elif location == 'startup':
+            folder = subprocess.check_output(
+                ['powershell', '-Command', '[Environment]::GetFolderPath("Startup")'],
+                text=True
+            ).strip()
+        else:
+            return _err('Invalid location')
+
+        shortcut_path = os.path.join(folder, 'WealthWatch.lnk')
+        # Use PowerShell to create a .lnk shortcut
+        ps_script = f'''
+$ws = New-Object -ComObject WScript.Shell
+$sc = $ws.CreateShortcut("{shortcut_path}")
+$sc.TargetPath = "{exe_path}"
+$sc.WorkingDirectory = "{os.path.dirname(exe_path)}"
+$sc.Description = "WealthWatch by PF9"
+$sc.Save()
+'''
+        subprocess.run(['powershell', '-Command', ps_script], check=True, capture_output=True)
+        return jsonify({'ok': True, 'path': shortcut_path})
+    except Exception as e:
+        return _err(f'Failed to create shortcut: {str(e)}')

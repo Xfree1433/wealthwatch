@@ -46,6 +46,19 @@
         letter-spacing: 6px; color: var(--accent); margin: 8px 0;
       }
       .pin-hint { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+      .shortcut-section {
+        margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);
+      }
+      .shortcut-section p { font-size: 12px; color: var(--text); line-height: 1.5; margin: 0 0 10px; }
+      .shortcut-btns { display: flex; gap: 8px; }
+      .shortcut-btn {
+        flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+        background: var(--surface2); color: var(--text); font-family: var(--font-sans);
+        font-size: 11px; font-weight: 500; cursor: pointer; transition: border-color 0.15s;
+      }
+      .shortcut-btn:hover { border-color: var(--accent); }
+      .shortcut-btn.done { border-color: #4ade80; color: #4ade80; }
+      .shortcut-tip { font-size: 11px; color: var(--muted); margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -64,6 +77,13 @@
             <p>Your PIN has been generated for this device:</p>
             <div class="pin-display">{{ generated_pin }}</div>
             <p>Save this PIN — you'll need it each time you open the app. It's stored locally on your computer and keeps your financial data private.</p>
+            <div class="shortcut-section">
+                <p>Create a shortcut so you can easily open WealthWatch anytime:</p>
+                <div class="shortcut-btns">
+                    <button class="shortcut-btn" onclick="createShortcut('desktop', this)">Desktop Shortcut</button>
+                    <button class="shortcut-btn" onclick="createShortcut('startup', this)">Start with Windows</button>
+                </div>
+            </div>
         </div>
         {% endif %}
         <form method="POST">
@@ -79,5 +99,30 @@
         {% endif %}
         <div class="login-footer">Plainspoken Foundry Nine LLC</div>
     </div>
+    <script>
+    function createShortcut(location, btn) {
+        btn.textContent = 'Creating...';
+        btn.disabled = true;
+        fetch('/api/create-shortcut', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+            body: JSON.stringify({location: location})
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                btn.textContent = location === 'desktop' ? 'Created!' : 'Enabled!';
+                btn.classList.add('done');
+            } else {
+                btn.textContent = d.error || 'Failed';
+                setTimeout(() => { btn.textContent = location === 'desktop' ? 'Desktop Shortcut' : 'Start with Windows'; btn.disabled = false; }, 2000);
+            }
+        })
+        .catch(() => {
+            btn.textContent = 'Failed';
+            setTimeout(() => { btn.textContent = location === 'desktop' ? 'Desktop Shortcut' : 'Start with Windows'; btn.disabled = false; }, 2000);
+        });
+    }
+    </script>
 </body>
 </html>
