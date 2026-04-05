@@ -1,0 +1,241 @@
+===============================================================================
+  WEALTHWATCH - User Acceptance Test Script
+  Personal Finance Dashboard (Desktop App)
+  URL: http://127.0.0.1:5100 (auto-opens in browser)
+  Login: PIN is auto-generated on first run and displayed on the login page
+===============================================================================
+
+HOW TO START:
+  cd WEALTHWATCH
+  venv\Scripts\activate
+  python launcher.py
+  (Browser opens automatically)
+
+  FIRST RUN: The app generates a PIN and displays it on the login page.
+  Write it down! PIN is stored at: %LOCALAPPDATA%\WealthWatch\.pin
+
+-------------------------------------------------------------------------------
+TEST 1: First Run & PIN Display
+-------------------------------------------------------------------------------
+[ ] Delete %LOCALAPPDATA%\WealthWatch\ folder (if exists) for clean test
+[ ] Run: python launcher.py
+[ ] Verify browser opens to http://127.0.0.1:5100
+[ ] Verify the login page shows:
+    - Welcome message with your generated PIN
+    - "Desktop Shortcut" button
+    - "Start with Windows" button
+[ ] Write down the PIN: ____________
+
+-------------------------------------------------------------------------------
+TEST 2: Login with PIN
+-------------------------------------------------------------------------------
+[ ] Enter the PIN shown on the first-run screen
+[ ] Click Login
+[ ] Verify you are taken to the Dashboard
+[ ] Verify no errors in the browser console
+
+-------------------------------------------------------------------------------
+TEST 3: Desktop Shortcut
+-------------------------------------------------------------------------------
+[ ] Go back to the login page (log out if needed)
+[ ] Click "Desktop Shortcut" button
+[ ] Verify a WealthWatch shortcut appears on your Desktop
+[ ] Double-click the shortcut to verify it launches the app
+
+-------------------------------------------------------------------------------
+TEST 4: Dashboard Overview
+-------------------------------------------------------------------------------
+[ ] Verify the dashboard displays:
+    - Account summary / net worth
+    - Recent transactions
+    - Alerts (if any)
+    - Cash flow overview
+[ ] Toggle between dark and light theme
+[ ] Verify theme applies correctly
+
+-------------------------------------------------------------------------------
+TEST 5: Create Accounts
+-------------------------------------------------------------------------------
+[ ] Navigate to Accounts
+[ ] Create 3 accounts:
+    1. "Main Checking" - Type: Checking, Balance: $5,000
+    2. "Emergency Savings" - Type: Savings, Balance: $10,000
+    3. "Brokerage" - Type: Investment, Balance: $25,000
+[ ] Verify all accounts appear in the list
+[ ] Verify total balance calculates correctly
+
+-------------------------------------------------------------------------------
+TEST 6: Add Transactions
+-------------------------------------------------------------------------------
+[ ] Navigate to Transactions
+[ ] Create 5 transactions:
+    1. Account: Main Checking, Amount: -$85.50, Category: Groceries,
+       Date: today, Description: "Weekly grocery run"
+    2. Account: Main Checking, Amount: -$45.00, Category: Dining,
+       Date: today, Description: "Dinner with friends"
+    3. Account: Main Checking, Amount: +$3,500, Category: Income,
+       Date: 1st of month, Description: "Paycheck"
+    4. Account: Main Checking, Amount: -$1,200, Category: Housing,
+       Date: 1st of month, Description: "Rent payment"
+    5. Account: Emergency Savings, Amount: +$500, Category: Savings,
+       Date: today, Description: "Monthly savings transfer"
+[ ] Verify all transactions appear in the list
+[ ] Verify account balances update
+
+-------------------------------------------------------------------------------
+TEST 7: Transaction Features
+-------------------------------------------------------------------------------
+[ ] Sort transactions by date, amount, and category
+[ ] Use pagination (if more than one page)
+[ ] Add a tag to a transaction (e.g., "tax-deductible")
+[ ] Try bulk select + bulk categorize on 2 transactions
+[ ] Upload a receipt image to a transaction
+[ ] Verify the receipt is viewable
+
+-------------------------------------------------------------------------------
+TEST 8: Transfer Between Accounts
+-------------------------------------------------------------------------------
+[ ] Create a transfer:
+    - From: Main Checking
+    - To: Emergency Savings
+    - Amount: $200
+[ ] Verify both accounts update:
+    - Checking decreases by $200
+    - Savings increases by $200
+[ ] Verify linked transactions appear in both accounts
+
+-------------------------------------------------------------------------------
+TEST 9: Split Transaction
+-------------------------------------------------------------------------------
+[ ] Create a new transaction: -$150, "Costco run"
+[ ] Split it into:
+    - Groceries: $100
+    - Household: $50
+[ ] Verify the split displays correctly
+
+-------------------------------------------------------------------------------
+TEST 10: Budget Setup
+-------------------------------------------------------------------------------
+[ ] Navigate to Budget
+[ ] Create budget categories:
+    - Groceries: $400/month
+    - Dining: $200/month
+    - Housing: $1,500/month
+    - Transportation: $300/month
+[ ] Verify actual spending calculates from your transactions
+[ ] Check progress bars (spent vs budgeted)
+[ ] Test budget rollover (if available)
+
+-------------------------------------------------------------------------------
+TEST 11: Goals
+-------------------------------------------------------------------------------
+[ ] Navigate to Goals
+[ ] Create a goal:
+    - Name: "Vacation Fund"
+    - Target: $3,000
+    - Current: $800
+    - Target Date: 6 months from now
+[ ] Verify progress bar displays
+[ ] Edit the goal and update current amount to $1,200
+[ ] Verify progress updates
+
+-------------------------------------------------------------------------------
+TEST 12: Recurring Bills
+-------------------------------------------------------------------------------
+[ ] Navigate to Recurring
+[ ] Create recurring items:
+    1. "Netflix" - $15.99/month, Category: Entertainment
+    2. "Rent" - $1,200/month, Category: Housing
+    3. "Paycheck" - $3,500/month, Category: Income
+[ ] Verify they appear in the recurring list
+[ ] Check the calendar view for upcoming dates
+[ ] Toggle one to inactive and verify
+[ ] Test auto-post feature (if available)
+
+-------------------------------------------------------------------------------
+TEST 13: Investment Holdings
+-------------------------------------------------------------------------------
+[ ] Navigate to Investments
+[ ] Add holdings:
+    1. Symbol: AAPL, Shares: 10, Cost Basis: $150, Current: $175
+    2. Symbol: VTI, Shares: 50, Cost Basis: $200, Current: $220
+[ ] Verify:
+    - Portfolio value calculates
+    - Gain/loss shows correctly (AAPL: +$250, VTI: +$1,000)
+    - Gain percentage displays
+    - Allocation chart renders
+
+-------------------------------------------------------------------------------
+TEST 14: Transaction Rules
+-------------------------------------------------------------------------------
+[ ] Navigate to Rules
+[ ] Create a rule:
+    - Pattern: contains "COSTCO"
+    - Category: Groceries
+    - Tag: "bulk-shopping"
+[ ] Add a new transaction with "COSTCO" in the description
+[ ] Verify the rule auto-categorizes it as Groceries
+[ ] Verify the tag is auto-applied
+
+-------------------------------------------------------------------------------
+TEST 15: Reports
+-------------------------------------------------------------------------------
+[ ] Navigate to Reports
+[ ] View spending trends chart (pie chart by category)
+[ ] View line chart (spending over time)
+[ ] Verify charts render with your transaction data
+[ ] Check cash flow report
+[ ] View net worth history
+
+-------------------------------------------------------------------------------
+TEST 16: CSV Import/Export
+-------------------------------------------------------------------------------
+[ ] Export transactions as CSV
+[ ] Verify the CSV file contains all your transactions
+[ ] Create a test CSV with 2-3 transactions
+[ ] Import the CSV
+[ ] Verify imported transactions appear
+[ ] NOTE: Import/Export requires a license key
+
+-------------------------------------------------------------------------------
+TEST 17: Backup & Restore
+-------------------------------------------------------------------------------
+[ ] Navigate to Settings
+[ ] Create a data backup (JSON export)
+[ ] Verify the backup file downloads
+[ ] NOTE: Backup/Restore requires a license key
+
+-------------------------------------------------------------------------------
+TEST 18: License Activation
+-------------------------------------------------------------------------------
+[ ] Navigate to Settings > License
+[ ] Verify demo mode limits display:
+    - 2 accounts max
+    - 50 transactions max
+    - 5 holdings max
+    - No import/export/backup
+[ ] If you have a license key, enter it and verify activation
+[ ] Verify limits are removed after activation
+
+-------------------------------------------------------------------------------
+TEST 19: Single-Instance Check
+-------------------------------------------------------------------------------
+[ ] With the app running, double-click the launcher again
+[ ] Verify a NEW browser tab opens (not a second server instance)
+[ ] Verify only one instance is running (check Task Manager)
+
+-------------------------------------------------------------------------------
+TEST 20: Auto-Shutdown on Tab Close
+-------------------------------------------------------------------------------
+[ ] Close the browser tab running WealthWatch
+[ ] Wait 5-10 seconds
+[ ] Verify the server process has stopped (check terminal or Task Manager)
+[ ] Verify that navigating between pages does NOT shut down the server
+
+===============================================================================
+  RESULTS
+===============================================================================
+Tests Passed:  ___ / 20
+Tester:        _______________
+Date:          _______________
+Notes:
