@@ -79,7 +79,6 @@ def api_license_deactivate():
 # ── Shortcut creator ────────────────────────────────────────────────────────
 
 @auth_bp.route('/api/create-shortcut', methods=['POST'])
-@login_required
 def api_create_shortcut():
     import sys
     d = request.get_json() or {}
