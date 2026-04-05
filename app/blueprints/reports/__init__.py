@@ -98,8 +98,10 @@ def api_budget_create():
             'INSERT INTO budget_categories (category, budgeted, icon) VALUES (?,?,?)',
             (_safe(d['category']).strip(), budgeted, _safe(d.get('icon', '\U0001f4b0')).strip())
         )
-    except db.IntegrityError:
-        return _err('Category already exists.')
+    except Exception as e:
+        if 'UNIQUE constraint' in str(e):
+            return _err('Category already exists.')
+        raise
     db.commit()
     row = db.execute('SELECT * FROM budget_categories WHERE id=?', (cur.lastrowid,)).fetchone()
     return jsonify(dict(row)), 201

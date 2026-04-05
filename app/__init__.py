@@ -27,6 +27,8 @@ def create_app(config_name=None):
     os.makedirs(app_data, exist_ok=True)
 
     # Initialize database
+    from app.services.database import init_app as db_init_app
+    db_init_app(app)
     with app.app_context():
         init_db(app)
 

@@ -82,12 +82,16 @@ def api_license_deactivate():
 @login_required
 def api_create_shortcut():
     import sys
-    if not getattr(sys, 'frozen', False):
-        return _err('Shortcuts can only be created from the desktop app')
-
     d = request.get_json() or {}
     location = d.get('location', 'desktop')
-    exe_path = sys.executable
+
+    if getattr(sys, 'frozen', False):
+        exe_path = sys.executable
+    else:
+        # Dev mode: create shortcut that runs launcher.py via python
+        exe_path = sys.executable  # python.exe
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'launcher.py')
+        script_path = os.path.normpath(script_path)
 
     try:
         import subprocess
@@ -106,11 +110,23 @@ def api_create_shortcut():
 
         shortcut_path = os.path.join(folder, 'WealthWatch.lnk')
         # Use PowerShell to create a .lnk shortcut
-        ps_script = f'''
+        if getattr(sys, 'frozen', False):
+            ps_script = f'''
 $ws = New-Object -ComObject WScript.Shell
 $sc = $ws.CreateShortcut("{shortcut_path}")
 $sc.TargetPath = "{exe_path}"
 $sc.WorkingDirectory = "{os.path.dirname(exe_path)}"
+$sc.Description = "WealthWatch by PF9"
+$sc.Save()
+'''
+        else:
+            working_dir = os.path.dirname(script_path)
+            ps_script = f'''
+$ws = New-Object -ComObject WScript.Shell
+$sc = $ws.CreateShortcut("{shortcut_path}")
+$sc.TargetPath = "{exe_path}"
+$sc.Arguments = '"{script_path}"'
+$sc.WorkingDirectory = "{working_dir}"
 $sc.Description = "WealthWatch by PF9"
 $sc.Save()
 '''

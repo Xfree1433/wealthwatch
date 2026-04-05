@@ -2,12 +2,29 @@ import sqlite3
 import os
 from datetime import date, timedelta
 import random
+from flask import g
+
 
 def get_db(app):
-    conn = sqlite3.connect(app.config['DATABASE'])
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA foreign_keys = ON')
-    return conn
+    """Get a database connection, reusing one per request via Flask g."""
+    if 'db' not in g:
+        g.db = sqlite3.connect(app.config['DATABASE'], timeout=10)
+        g.db.row_factory = sqlite3.Row
+        g.db.execute('PRAGMA journal_mode=WAL')
+        g.db.execute('PRAGMA foreign_keys = ON')
+    return g.db
+
+
+def close_db(e=None):
+    """Close the database connection at end of request."""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+
+def init_app(app):
+    """Register the teardown handler with the Flask app."""
+    app.teardown_appcontext(close_db)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -284,7 +301,6 @@ def snapshot_net_worth(app):
              round(row['cash'], 2), round(row['investments'], 2))
         )
         conn.commit()
-    conn.close()
 
 def _migrate(conn):
     """Run schema migrations for existing databases."""
@@ -372,14 +388,12 @@ def process_recurring(app):
         posted += 1
     if posted:
         conn.commit()
-    conn.close()
     return posted
 
 def auto_categorize(app, description):
     """Match description against transaction rules. Returns (category, tags) or (None, None)."""
     conn = get_db(app)
     rules = conn.execute('SELECT * FROM transaction_rules ORDER BY priority DESC').fetchall()
-    conn.close()
     desc_lower = description.lower()
     for r in rules:
         if r['pattern'].lower() in desc_lower:
@@ -393,7 +407,6 @@ def compute_rollover(app, category, month_str):
         'SELECT rollover FROM budget_rollover WHERE category=? AND month=?',
         (category, month_str)
     ).fetchone()
-    conn.close()
     return row['rollover'] if row else 0.0
 
 def save_rollover(app):
@@ -431,10 +444,13 @@ def save_rollover(app):
                 (c['category'], curr_month, new_rollover)
             )
     conn.commit()
-    conn.close()
 
 def init_db(app):
-    conn = get_db(app)
+    """Initialize database schema and seed data. Uses direct connection (no Flask g)."""
+    conn = sqlite3.connect(app.config['DATABASE'], timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA foreign_keys = ON')
     conn.executescript(SCHEMA)
     _migrate(conn)
     count = conn.execute('SELECT COUNT(*) FROM accounts').fetchone()[0]
