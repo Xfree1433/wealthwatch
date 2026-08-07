@@ -21,7 +21,7 @@ posthog.init('phc_kqFGBkXKCodfJGJBFdZs3h9Qm43AQaqnyCiETDAwzgmw',{api_host:'https
 posthog.register({app:'wealthwatch'});
 {% if current_user and current_user.is_authenticated and current_user.email %}
 try{posthog.identify("{{ current_user.email }}",{email:"{{ current_user.email }}",app:"wealthwatch"});}catch(e){}
-{%% endif %%}
+{% endif %}
 </script>
 </head>
 <body>
